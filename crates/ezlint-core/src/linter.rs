@@ -1,6 +1,7 @@
 //! The lint engine: compiled rules in, [`Violation`]s out.
 
-use crate::config::{Config, Rule};
+use crate::config::{Config, Rule, Scope};
+use crate::scopes;
 use crate::Severity;
 
 /// A byte range in the linted source.
@@ -60,6 +61,7 @@ pub struct Violation {
 #[derive(Debug, Clone)]
 pub struct Linter {
     rules: Vec<Rule>,
+    scopes: Vec<Scope>,
 }
 
 impl Linter {
@@ -68,45 +70,102 @@ impl Linter {
     pub fn new(config: Config) -> Self {
         Self {
             rules: config.rules,
+            scopes: config.scopes,
         }
     }
 
-    /// The compiled rules, in config order.
+    /// The global rules, in config order.
     pub fn rules(&self) -> &[Rule] {
         &self.rules
     }
 
-    /// Lints one snapshot of a source file.
-    ///
-    /// Every rule scans the whole source; hits are returned sorted by
-    /// position (then span end, then rule id) so output is deterministic
-    /// regardless of rule order. Zero-width matches are skipped.
+    /// The scopes, in config order.
+    pub fn scopes(&self) -> &[Scope] {
+        &self.scopes
+    }
+
+    /// Lints one snapshot of a source file with the **global rules**
+    /// only — scoped rules are ignored. Hits are sorted by position (then
+    /// span end, then rule id) so output is deterministic regardless of
+    /// rule order. Zero-width matches are skipped.
     pub fn lint(&self, source: &str) -> Vec<Violation> {
         let mut out = Vec::new();
-        for rule in &self.rules {
-            for caps in rule.regex.captures_iter(source) {
-                let whole = match caps.get(0) {
-                    Some(m) if !m.is_empty() => m,
-                    _ => continue,
-                };
-                out.push(Violation {
-                    rule_id: rule.id.clone(),
-                    severity: rule.severity,
-                    span: Span::new(whole.start(), whole.end()),
-                    message: rule.message.render(&caps),
-                });
-            }
-        }
-        out.sort_by(|a, b| {
-            (a.span.start, a.span.end, &a.rule_id, &a.message).cmp(&(
-                b.span.start,
-                b.span.end,
-                &b.rule_id,
-                &b.message,
-            ))
-        });
+        self.collect_global(source, &mut out);
+        sort_violations(&mut out);
         out
     }
+
+    /// Lints pre-computed scope regions — the subpasses. `segments` are
+    /// `(scope index, region)` pairs, typically from [`scopes::segment_all`]
+    /// or a parse tree's scoped nodes.
+    pub fn lint_segments(&self, source: &str, segments: &[(usize, Span)]) -> Vec<Violation> {
+        let mut out = Vec::new();
+        self.collect_segments(source, segments, &mut out);
+        sort_violations(&mut out);
+        out
+    }
+
+    /// Global rules plus scoped rules over `segments`, merged and sorted —
+    /// one call for consumers that already have regions (e.g. a parse
+    /// tree).
+    pub fn lint_merged(&self, source: &str, segments: &[(usize, Span)]) -> Vec<Violation> {
+        let mut out = Vec::new();
+        self.collect_global(source, &mut out);
+        self.collect_segments(source, segments, &mut out);
+        sort_violations(&mut out);
+        out
+    }
+
+    /// Segments the source itself, then lints everything — the one-liner
+    /// for CLI use.
+    pub fn lint_all(&self, source: &str) -> Vec<Violation> {
+        let segments = scopes::segment_all(source, &self.scopes);
+        self.lint_merged(source, &segments)
+    }
+
+    fn collect_global(&self, source: &str, out: &mut Vec<Violation>) {
+        for rule in &self.rules {
+            collect_rule(rule, source, 0, out);
+        }
+    }
+
+    fn collect_segments(&self, source: &str, segments: &[(usize, Span)], out: &mut Vec<Violation>) {
+        for &(scope_index, segment) in segments {
+            let Some(scope) = self.scopes.get(scope_index) else {
+                continue;
+            };
+            let region = &source[segment.to_range()];
+            for rule in &scope.rules {
+                collect_rule(rule, region, segment.start, out);
+            }
+        }
+    }
+}
+
+fn collect_rule(rule: &Rule, text: &str, offset: usize, out: &mut Vec<Violation>) {
+    for caps in rule.regex.captures_iter(text) {
+        let whole = match caps.get(0) {
+            Some(m) if !m.is_empty() => m,
+            _ => continue,
+        };
+        out.push(Violation {
+            rule_id: rule.id.clone(),
+            severity: rule.severity,
+            span: Span::new(offset + whole.start(), offset + whole.end()),
+            message: rule.message.render(&caps),
+        });
+    }
+}
+
+fn sort_violations(violations: &mut [Violation]) {
+    violations.sort_by(|a, b| {
+        (a.span.start, a.span.end, &a.rule_id, &a.message).cmp(&(
+            b.span.start,
+            b.span.end,
+            &b.rule_id,
+            &b.message,
+        ))
+    });
 }
 
 /// Converts a byte offset to a 1-based `(line, column)` pair for
@@ -195,5 +254,70 @@ rules:
     fn mid_char_offset_floors() {
         // Byte 1 is the middle of the two-byte 'é'.
         assert_eq!(line_col("éx", 1), (1, 1));
+    }
+
+    const SCOPED: &str = "\
+version: 1
+rules:
+  - id: global
+    pattern: 'G'
+    message: global hit
+scopes:
+  - id: sh
+    start: '^```sh$'
+    end: '^```$'
+    rules:
+      - id: inner
+        pattern: 'sudo'
+        message: \"no sudo: '{match}'\"
+        severity: error
+";
+
+    const SCOPED_TEXT: &str = "G\n```sh\nsudo ls\n```\n";
+
+    #[test]
+    fn lint_is_global_only() {
+        let linter = linter(SCOPED);
+        let v = linter.lint(SCOPED_TEXT);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule_id, "global");
+        assert_eq!(v[0].span.to_range(), 0..1);
+    }
+
+    #[test]
+    fn segments_shift_spans_to_absolute_offsets() {
+        let linter = linter(SCOPED);
+        let segments = crate::scopes::segment_all(SCOPED_TEXT, linter.scopes());
+        assert_eq!(segments.len(), 1);
+        let v = linter.lint_segments(SCOPED_TEXT, &segments);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule_id, "inner");
+        assert_eq!(v[0].severity, Severity::Error);
+        // "sudo" is at absolute bytes 8..12.
+        assert_eq!(v[0].span.to_range(), 8..12);
+        assert_eq!(v[0].message, "no sudo: 'sudo'");
+    }
+
+    #[test]
+    fn merged_combines_and_sorts() {
+        let linter = linter(SCOPED);
+        let segments = crate::scopes::segment_all(SCOPED_TEXT, linter.scopes());
+        let v = linter.lint_merged(SCOPED_TEXT, &segments);
+        let ids: Vec<&str> = v.iter().map(|x| x.rule_id.as_str()).collect();
+        assert_eq!(ids, ["global", "inner"]);
+    }
+
+    #[test]
+    fn lint_all_segments_and_lints() {
+        let linter = linter(SCOPED);
+        let v = linter.lint_all(SCOPED_TEXT);
+        assert_eq!(v.len(), 2);
+    }
+
+    #[test]
+    fn unknown_scope_index_is_skipped() {
+        let linter = linter(SCOPED);
+        let segments = [(99, Span::new(0, SCOPED_TEXT.len()))];
+        assert!(linter.lint_segments(SCOPED_TEXT, &segments).is_empty());
     }
 }

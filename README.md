@@ -54,11 +54,16 @@ explicit path too).
 
 ```yaml
 version: 1                # required; this ezlint understands version 1
-rules:
+rules:                    # file-global rules; optional if `scopes` is present
   - id: rule-name         # required; unique; becomes the diagnostic's code
     pattern: '\t+'        # required; Rust `regex` crate syntax (no lookaround)
     message: "..."        # required; see templates below
     severity: warning     # optional: error | warning | info | hint (default warning)
+scopes:                   # optional; see "Scoped rules" below
+  - id: scope-name        # unique; shares a namespace with rule ids
+    start: '...'          # required; starts a region (multi-line `^`/`$`)
+    end: '...'            # optional; ends a region (default: end of file)
+    rules: [...]          # rules that run only inside this scope's regions
 ```
 
 Everything is validated at load time — regex syntax, message placeholders,
@@ -78,6 +83,37 @@ ezlint: rules.yaml:5: rule 0 ('no-tabs'): invalid pattern: repetition operator m
 | `{{` / `}}` | literal braces |
 
 Unknown placeholder names are a config error, caught at load time.
+
+### Scoped rules
+
+A `scopes` entry segments the file and runs its rules **only inside those
+regions** — lint's version of a pass that expands, then subpasses that run
+per region:
+
+```yaml
+version: 1
+scopes:
+  - id: shell-fence
+    start: '^```sh$'   # where a region begins (required)
+    end: '^```$'       # where it ends (optional; default: end of file)
+    rules:
+      - id: no-sudo
+        pattern: '\bsudo\b'
+        message: "Don't use sudo in scripts"
+        severity: error
+```
+
+* `start`/`end` are compiled with **multi-line mode forced**, so `^`/`$`
+  anchor to lines.
+* Regions are sequential within a scope; different scopes may overlap
+  freely (each family is independent).
+* Rule and scope ids share one namespace and must be unique across the
+  whole config.
+* In the editor, an edit inside one region re-lints only that region —
+  every other region keeps its identity in the parse tree.
+
+See [`examples/scoped-rules.yaml`](examples/scoped-rules.yaml) for a full
+config.
 
 ### Regex flavor
 
@@ -111,11 +147,12 @@ filter, style, and (later) suppress per rule.
 
 ## Roadmap
 
-- v2: rule callbacks (Rust snippets with a compile cache, and Lua), `fix:`
-  templates → LSP CodeActions, inline `# ezlint:disable=<id>` comments,
-  per-rule file globs, config discovery up the directory tree.
+- v2: nested scopes (a scope inside a scope), rule callbacks (Rust
+  snippets with a compile cache, and Lua), `fix:` templates → LSP
+  CodeActions, inline `# ezlint:disable=<id>` comments, per-rule file
+  globs, config discovery up the directory tree.
 
 ## Status
 
-v0.1.0 — regex rules only; the schema is versioned to keep future configs
-compatible.
+0.2.0 — regex rules, global and scoped; the schema is versioned to keep
+future configs compatible.

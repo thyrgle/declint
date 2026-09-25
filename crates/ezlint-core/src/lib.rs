@@ -35,6 +35,24 @@
 //! duplicate rule ids, unknown severities — so a rule file is either fully
 //! usable or rejected with the rule id and file line of the problem.
 //!
+//! Rules can also be **scoped**: a `scopes` entry segments the file (a
+//! `start` pattern begins a region, an optional `end` pattern closes it)
+//! and its `rules` run only inside those regions — the lint equivalent of
+//! a pass that expands, then subpasses that run per region:
+//!
+//! ```yaml
+//! version: 1
+//! scopes:
+//!   - id: shell-fence
+//!     start: '^```sh$'
+//!     end: '^```$'
+//!     rules:
+//!       - id: no-sudo
+//!         pattern: '\bsudo\b'
+//!         message: "Don't use sudo in scripts"
+//!         severity: error
+//! ```
+//!
 //! [`ezlint`]: https://crates.io/crates/ezlint
 
 #![forbid(unsafe_code)]
@@ -42,10 +60,12 @@
 
 mod config;
 mod linter;
+mod scopes;
 mod template;
 
-pub use config::{Config, ConfigError, Rule, SUPPORTED_VERSION};
+pub use config::{Config, ConfigError, Rule, Scope, SUPPORTED_VERSION};
 pub use linter::{line_col, Linter, Span, Violation};
+pub use scopes::{segment, segment_all};
 pub use template::Template;
 
 /// How serious a violation is.

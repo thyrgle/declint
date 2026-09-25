@@ -16,7 +16,7 @@ pub const SUPPORTED_VERSION: u64 = 1;
 /// Everything that can go wrong while loading a config file.
 ///
 /// Carries a 1-based file line whenever the problem can be pinned to one
-/// (`ezlint.yaml:5: rule 1 ('no-tabs'): invalid pattern ...`). Rule-level
+/// (`ezlint.yaml:5: rule 0 ('no-tabs'): invalid pattern ...`). Rule-level
 /// errors point at the rule's `- ` entry line; YAML syntax errors point at
 /// the exact position reported by the parser.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,21 +90,25 @@ impl fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-/// A validated configuration: the schema version and its rules.
+/// A validated configuration: the schema version, global rules, and
+/// scopes.
 #[derive(Debug, Clone)]
 pub struct Config {
     /// The config's declared schema version (always
     /// [`SUPPORTED_VERSION`]).
     pub version: u64,
-    /// The validated rules, in file order.
+    /// The validated global rules, in file order.
     pub rules: Vec<Rule>,
+    /// The validated scopes, in file order.
+    pub scopes: Vec<Scope>,
 }
 
 /// One validated lint rule.
 #[derive(Debug, Clone)]
 pub struct Rule {
     /// The rule's unique id — what shows up as the diagnostic's code, and
-    /// what suppressions (a v2 feature) will name.
+    /// what suppressions (a future feature) will name. Unique across all
+    /// global rules and every scope's rules.
     pub id: String,
     /// The pattern, as written in the config.
     pub pattern: String,
@@ -115,6 +119,27 @@ pub struct Rule {
     /// The compiled pattern — construction only succeeds when this is
     /// valid.
     pub(crate) regex: regex::Regex,
+}
+
+/// One validated scope: a segmenter (`start`/`end`) plus the rules that
+/// run only inside its regions.
+///
+/// `start` and `end` are compiled with multi-line mode forced on, so `^`
+/// and `$` anchor to lines — the natural way to write region boundaries.
+#[derive(Debug, Clone)]
+pub struct Scope {
+    /// The scope's unique id. Shares a namespace with rule ids.
+    pub id: String,
+    /// Where a region begins, as written.
+    pub start: String,
+    /// Where a region ends, as written (`None` = run to end of file).
+    pub end: Option<String>,
+    /// The rules that run inside this scope's regions.
+    pub rules: Vec<Rule>,
+    /// The compiled `start` pattern (multi-line forced).
+    pub(crate) start_re: regex::Regex,
+    /// The compiled `end` pattern (multi-line forced).
+    pub(crate) end_re: Option<regex::Regex>,
 }
 
 impl Config {
@@ -128,7 +153,7 @@ impl Config {
                 None => err,
             }
         })?;
-        Self::from_value(value, &sequence_item_lines(yaml, "rules"))
+        Self::from_value(value, yaml)
     }
 
     /// Loads and validates the config file at `path`.
@@ -141,11 +166,10 @@ impl Config {
         Self::from_str(&yaml).map_err(|e| e.with_path(shown))
     }
 
-    fn from_value(value: Value, rule_lines: &[usize]) -> Result<Self, ConfigError> {
+    fn from_value(value: Value, yaml: &str) -> Result<Self, ConfigError> {
         let Value::Mapping(map) = value else {
-            return Err(ConfigError::at_line(
-                "config must be a YAML mapping with `version` and `rules` keys",
-                rule_lines.first().map(|l| l - 1),
+            return Err(ConfigError::new(
+                "config must be a YAML mapping with `version` and `rules` and/or `scopes` keys",
             ));
         };
 
@@ -165,60 +189,179 @@ impl Config {
             ));
         }
 
-        let rules_value = map
-            .get(Value::from("rules"))
-            .ok_or_else(|| ConfigError::new("missing `rules` key"))?;
-        let Value::Sequence(entries) = rules_value else {
-            return Err(ConfigError::at_line(
-                "`rules` must be a list of rule mappings",
-                rule_lines.first().map(|l| l - 1),
-            ));
-        };
-
-        let mut rules = Vec::with_capacity(entries.len());
-        let mut seen_ids = HashSet::new();
-        for (index, entry) in entries.iter().enumerate() {
-            let line = rule_lines.get(index).copied();
-            rules.push(parse_rule(entry, index, line, &mut seen_ids)?);
+        let rules_value = map.get(Value::from("rules"));
+        let scopes_value = map.get(Value::from("scopes"));
+        if rules_value.is_none() && scopes_value.is_none() {
+            return Err(ConfigError::new("config must define `rules` or `scopes`"));
         }
 
-        Ok(Self { version, rules })
+        let mut seen_ids = HashSet::new();
+
+        let rules = match rules_value {
+            None => Vec::new(),
+            Some(v) => {
+                let Value::Sequence(entries) = v else {
+                    return Err(ConfigError::new("`rules` must be a list of rule mappings"));
+                };
+                let lines = sequence_item_lines(yaml, "rules");
+                entries
+                    .iter()
+                    .enumerate()
+                    .map(|(index, entry)| {
+                        parse_rule(entry, index, "", lines.get(index).copied(), &mut seen_ids)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            }
+        };
+
+        let scopes = match scopes_value {
+            None => Vec::new(),
+            Some(v) => {
+                let Value::Sequence(entries) = v else {
+                    return Err(ConfigError::new("`scopes` must be a list of scope mappings"));
+                };
+                let lines = sequence_item_lines(yaml, "scopes");
+                entries
+                    .iter()
+                    .enumerate()
+                    .map(|(index, entry)| {
+                        parse_scope(
+                            entry,
+                            index,
+                            lines.get(index).copied(),
+                            yaml,
+                            &mut seen_ids,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            }
+        };
+
+        Ok(Self {
+            version,
+            rules,
+            scopes,
+        })
     }
 }
 
-/// Finds the 1-based line of each `- ` item of the block sequence stored
-/// under `key` — the rule entry lines. Flow-style sequences (`rules:
-/// [...]`) yield nothing, and errors then simply carry no line.
-fn sequence_item_lines(yaml: &str, key: &str) -> Vec<usize> {
-    let key_prefix = format!("{key}:");
-    let mut lines = Vec::new();
-    let mut in_sequence = false;
-    let mut key_indent = 0usize;
-    for (i, line) in yaml.lines().enumerate() {
-        let trimmed = line.trim_start();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        let indent = line.len() - trimmed.len();
-        if !in_sequence {
-            if line.trim_end().starts_with(&key_prefix)
-                && trimmed[key_prefix.len()..].trim().is_empty()
-            {
-                in_sequence = true;
-                key_indent = indent;
+/// Compiles a scope boundary pattern with multi-line mode forced on, so
+/// `^`/`$` anchor to lines.
+fn compile_boundary(pattern: &str) -> Result<regex::Regex, regex::Error> {
+    regex::RegexBuilder::new(pattern).multi_line(true).build()
+}
+
+fn parse_scope(
+    entry: &Value,
+    index: usize,
+    line: Option<usize>,
+    yaml: &str,
+    seen_ids: &mut HashSet<String>,
+) -> Result<Scope, ConfigError> {
+    let at_scope = |message: &str| -> ConfigError {
+        let id = entry
+            .get(Value::from("id"))
+            .and_then(|v| v.as_str())
+            .map(|id| format!(" ('{id}')"))
+            .unwrap_or_default();
+        ConfigError::at_line(format!("scope {index}{id}: {message}"), line)
+    };
+
+    let Value::Mapping(map) = entry else {
+        return Err(at_scope("must be a mapping with `id`, `start`, and `rules` keys"));
+    };
+
+    for key in map.keys() {
+        if let Some(key) = key.as_str() {
+            if !matches!(key, "id" | "start" | "end" | "rules") {
+                return Err(at_scope(&format!(
+                    "unknown key `{key}` (expected one of `id`, `start`, `end`, `rules`)"
+                )));
             }
-        } else if indent <= key_indent {
-            break; // the sequence is over
-        } else if trimmed.starts_with("- ") || trimmed == "-" {
-            lines.push(i + 1);
         }
     }
-    lines
+
+    let missing = |key: &str| at_scope(&format!("missing `{key}` key"));
+
+    let id_value = map.get(Value::from("id")).ok_or_else(|| missing("id"))?;
+    let id = id_value
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| at_scope("`id` must be a non-empty string"))?
+        .to_string();
+    if !seen_ids.insert(id.clone()) {
+        return Err(at_scope(&format!(
+            "duplicate id `{id}` — rule and scope ids share one namespace and must be unique"
+        )));
+    }
+
+    let start_value = map.get(Value::from("start")).ok_or_else(|| missing("start"))?;
+    let start = start_value
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| at_scope("`start` must be a non-empty string"))?
+        .to_string();
+    let start_re =
+        compile_boundary(&start).map_err(|e| at_scope(&format!("invalid start pattern: {e}")))?;
+
+    let end = match map.get(Value::from("end")) {
+        None => None,
+        Some(end_value) => match end_value.as_str().filter(|s| !s.is_empty()) {
+            Some(end) => {
+                compile_boundary(end)
+                    .map_err(|e| at_scope(&format!("invalid end pattern: {e}")))?;
+                Some(end.to_string())
+            }
+            None => {
+                return Err(at_scope("`end` must be a non-empty string"));
+            }
+        },
+    };
+    let end_re = end
+        .as_ref()
+        .map(|pattern| compile_boundary(pattern).expect("validated above"));
+
+    let rules = match map.get(Value::from("rules")) {
+        None => Vec::new(),
+        Some(rules_value) => {
+            let Value::Sequence(entries) = rules_value else {
+                return Err(at_scope("`rules` must be a list of rule mappings"));
+            };
+            let nested_lines = nested_sequence_item_lines(yaml, line, "rules");
+            entries
+                .iter()
+                .enumerate()
+                .map(|(rule_index, rule_entry)| {
+                    let label = format!("scope '{id}' ");
+                    parse_rule(
+                        rule_entry,
+                        rule_index,
+                        &label,
+                        nested_lines.get(rule_index).copied(),
+                        seen_ids,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        }
+    };
+    if rules.is_empty() {
+        return Err(at_scope("scope has no `rules` — a scope without rules does nothing"));
+    }
+
+    Ok(Scope {
+        id,
+        start,
+        end,
+        rules,
+        start_re,
+        end_re,
+    })
 }
 
 fn parse_rule(
     entry: &Value,
     index: usize,
+    prefix: &str,
     line: Option<usize>,
     seen_ids: &mut HashSet<String>,
 ) -> Result<Rule, ConfigError> {
@@ -228,7 +371,7 @@ fn parse_rule(
             .and_then(|v| v.as_str())
             .map(|id| format!(" ('{id}')"))
             .unwrap_or_default();
-        ConfigError::at_line(format!("rule {index}{id}: {message}"), line)
+        ConfigError::at_line(format!("{prefix}rule {index}{id}: {message}"), line)
     };
 
     let Value::Mapping(map) = entry else {
@@ -258,7 +401,7 @@ fn parse_rule(
         .to_string();
     if !seen_ids.insert(id.clone()) {
         return Err(at_rule(format!(
-            "duplicate id `{id}` — rule ids must be unique"
+            "duplicate id `{id}` — rule and scope ids share one namespace and must be unique"
         )));
     }
 
@@ -281,8 +424,8 @@ fn parse_rule(
         .as_str()
         .filter(|s| !s.is_empty())
         .ok_or_else(|| at_rule("`message` must be a non-empty string".into()))?;
-    let template =
-        Template::parse(message_src).map_err(|e| at_rule(format!("invalid message template: {e}")))?;
+    let template = Template::parse(message_src)
+        .map_err(|e| at_rule(format!("invalid message template: {e}")))?;
     template
         .validate(&regex)
         .map_err(|e| at_rule(format!("invalid message template: {e}")))?;
@@ -309,9 +452,62 @@ fn parse_rule(
     })
 }
 
+/// Finds the 1-based line of each `- ` item of the block sequence stored
+/// under `key` — the rule/scope entry lines. Flow-style sequences
+/// (`rules: [...]`) yield nothing, and errors then simply carry no line.
+fn sequence_item_lines(yaml: &str, key: &str) -> Vec<usize> {
+    block_seq_item_lines(
+        yaml.lines().enumerate().map(|(i, l)| (i + 1, l)),
+        key,
+    )
+}
+
+/// Like [`sequence_item_lines`], but scanning only after `from_line`
+/// (1-based, exclusive) — for the `rules` nested inside a scope whose
+/// `- ` entry is on that line.
+fn nested_sequence_item_lines(yaml: &str, from_line: Option<usize>, key: &str) -> Vec<usize> {
+    let skip = from_line.unwrap_or(usize::MAX);
+    block_seq_item_lines(
+        yaml.lines()
+            .enumerate()
+            .skip(skip)
+            .map(|(i, l)| (i + 1, l)),
+        key,
+    )
+}
+
+fn block_seq_item_lines<'a>(
+    lines: impl Iterator<Item = (usize, &'a str)>,
+    key: &str,
+) -> Vec<usize> {
+    let key_prefix = format!("{key}:");
+    let mut lines = Vec::from_iter(lines);
+    let mut items = Vec::new();
+    let mut in_sequence = false;
+    let mut key_indent = 0usize;
+    for (no, line) in lines.drain(..) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len() - trimmed.len();
+        if !in_sequence {
+            if trimmed.starts_with(&key_prefix) && trimmed[key_prefix.len()..].trim().is_empty() {
+                in_sequence = true;
+                key_indent = indent;
+            }
+        } else if indent <= key_indent {
+            break; // the sequence is over
+        } else if trimmed.starts_with("- ") || trimmed == "-" {
+            items.push(no);
+        }
+    }
+    items
+}
+
 #[cfg(test)]
 mod tests {
-    use super::sequence_item_lines;
+    use super::*;
 
     #[test]
     fn finds_block_sequence_items() {
@@ -327,6 +523,24 @@ rules:
 other: key
 ";
         assert_eq!(sequence_item_lines(yaml, "rules"), vec![3, 7]);
+    }
+
+    #[test]
+    fn finds_nested_items_after_a_line() {
+        let yaml = "\
+version: 1
+scopes:
+  - id: s
+    start: 'x'
+    rules:
+      - id: r1
+        pattern: p
+      - id: r2
+        pattern: q
+";
+        // The scope's `- ` entry is on line 3; its nested rule items are
+        // lines 6 and 8.
+        assert_eq!(nested_sequence_item_lines(yaml, Some(3), "rules"), vec![6, 8]);
     }
 
     #[test]

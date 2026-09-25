@@ -1,0 +1,49 @@
+# An example ezlint rule set with scoped rules.
+#
+# Global rules apply everywhere; each scope's rules apply only inside that
+# scope's regions. Copy as `ezlint.yaml`, then:
+#   ezlint serve ezlint.yaml          # in your editor (LSP over stdio)
+#   ezlint check --config ezlint.yaml notes.md   # in CI
+
+version: 1
+rules:
+  # Global: everywhere in the file.
+  - id: no-tabs
+    pattern: '\t+'
+    message: "Tab character — use spaces"
+    severity: warning
+
+  - id: trailing-whitespace
+    pattern: '[ \t]+$'
+    message: "Trailing whitespace"
+    severity: hint
+
+  - id: todo-comment
+    pattern: '\bTODO\b'
+    message: "Unresolved TODO: '{match}'"
+    severity: info
+
+scopes:
+  # Inside ```sh fences: don't allow sudo or rm -rf.
+  - id: shell-fence
+    start: '^```sh$'
+    end: '^```$'
+    rules:
+      - id: no-sudo
+        pattern: '\bsudo\b'
+        message: "Possible privilege escalation: '{match}'"
+        severity: error
+      - id: no-rm-rf
+        pattern: '\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+'
+        message: "Recursive/forced removal needs a second look"
+        severity: error
+
+  # Inside ```ini fences: keys must be kebab-case.
+  - id: ini-fence
+    start: '^```ini$'
+    end: '^```$'
+    rules:
+      - id: kebab-case-keys
+        pattern: '^(?<key>[A-Za-z_][\w ]*)\s*='
+        message: "Key '{key}' should be kebab-case"
+        severity: info

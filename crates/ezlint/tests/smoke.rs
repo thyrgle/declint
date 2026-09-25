@@ -14,14 +14,20 @@ rules:
     pattern: '\\t+'
     message: \"Use spaces, found '{match}'\"
     severity: warning
-  - id: todo
-    pattern: '\\bTODO\\b'
-    message: 'Unresolved TODO'
-    severity: info
+scopes:
+  - id: shell
+    start: '^```sh$'
+    end: '^```$'
+    rules:
+      - id: no-sudo
+        pattern: '\\bsudo\\b'
+        message: \"Don't use sudo in scripts\"
+        severity: error
 ";
 
-/// A document with one tab (line 0) and one TODO (line 1).
-const SOURCE: &str = "def x = 1;\t# note\ndef y = 2 # TODO wire this up\n";
+/// A tab on line 0 (global rule) and a shell fence around a `sudo` on
+/// line 2 (scoped rule).
+const SOURCE: &str = "def x = 1;\t# note\n```sh\nsudo ls -la /\n```\n";
 
 fn spawn_server(config_path: &str) -> (Child, ChildStdin, Receiver<String>) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_ezlint"))
@@ -143,7 +149,8 @@ fn ezlint_server_smoke() {
         &notification("initialized", serde_json::json!({})),
     );
 
-    // didOpen -> two diagnostics: the tab (warning) and the TODO (info).
+    // didOpen -> two diagnostics: the tab (warning, global) and the sudo
+    // (error, inside the shell-fence scope).
     send(
         &mut stdin,
         &notification(
@@ -160,7 +167,7 @@ fn ezlint_server_smoke() {
     );
     let diags = wait_for_diagnostics(&rx, Some(0));
     let diags = diags.as_array().unwrap();
-    assert_eq!(diags.len(), 2, "tab + TODO must be flagged");
+    assert_eq!(diags.len(), 2, "tab + sudo must be flagged");
 
     let tab = diags
         .iter()
@@ -176,15 +183,16 @@ fn ezlint_server_smoke() {
     assert_eq!(tab["range"]["start"]["line"], 0);
     assert_eq!(tab["range"]["start"]["character"], 10);
 
-    let todo = diags
+    let sudo = diags
         .iter()
-        .find(|d| d["code"] == "todo")
-        .expect("todo diagnostic");
-    assert_eq!(todo["severity"], 3, "informational");
-    assert_eq!(todo["range"]["start"]["line"], 1);
+        .find(|d| d["code"] == "no-sudo")
+        .expect("no-sudo diagnostic");
+    assert_eq!(sudo["severity"], 1, "error");
+    assert_eq!(sudo["range"]["start"]["line"], 2);
+    assert_eq!(sudo["range"]["start"]["character"], 0);
 
-    // Incremental didChange: replace the tab (line 0, char 9..10) with a
-    // space -> only the TODO diagnostic remains.
+    // Incremental didChange: replace the tab (line 0, char 10..11) with a
+    // space -> the global violation heals; the scoped one remains.
     send(
         &mut stdin,
         &notification(
@@ -203,8 +211,8 @@ fn ezlint_server_smoke() {
     );
     let diags = wait_for_diagnostics(&rx, Some(1));
     let diags = diags.as_array().unwrap();
-    assert_eq!(diags.len(), 1, "only the TODO survives");
-    assert_eq!(diags[0]["code"], "todo");
+    assert_eq!(diags.len(), 1, "only the scoped sudo survives");
+    assert_eq!(diags[0]["code"], "no-sudo");
 
     // Shutdown handshake.
     send(&mut stdin, &request(2, "shutdown", serde_json::Value::Null));

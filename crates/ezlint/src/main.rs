@@ -70,7 +70,7 @@ fn check(config_path: &PathBuf, files: &[PathBuf]) -> ExitCode {
                 continue;
             }
         };
-        for violation in linter.lint(&source) {
+        for violation in linter.lint_all(&source) {
             let (line, col) = ezlint_core::line_col(&source, violation.span.start);
             println!(
                 "{}:{line}:{col}: {}[{}]: {}",

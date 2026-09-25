@@ -136,7 +136,7 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "ezlint"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "ezlint-core",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "ezlint-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "regex",
  "serde_yaml",
@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "ezlint-lsp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ezlint-core",
  "increparse",

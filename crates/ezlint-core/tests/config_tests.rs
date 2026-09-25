@@ -41,9 +41,13 @@ fn version_is_required_and_pinned() {
 }
 
 #[test]
-fn rules_are_required() {
-    assert_eq!(err("version: 1"), "missing `rules` key");
+fn rules_or_scopes_are_required() {
+    assert_eq!(
+        err("version: 1"),
+        "config must define `rules` or `scopes`"
+    );
     assert!(err("version: 1\nrules: nope").contains("`rules` must be a list"));
+    assert!(err("version: 1\nscopes: nope").contains("`scopes` must be a list"));
 }
 
 #[test]
@@ -117,4 +121,84 @@ fn load_attaches_path() {
 fn missing_file_is_reported() {
     let e = Config::load("/nonexistent/ezlint.yaml").unwrap_err();
     assert!(e.to_string().contains("cannot read config file"), "{e}");
+}
+
+const SHELL_SCOPE: &str = "\
+version: 1
+scopes:
+  - id: sh
+    start: '^```sh$'
+    end: '^```$'
+    rules:
+      - id: no-sudo
+        pattern: '\\bsudo\\b'
+        message: \"no sudo\"
+        severity: error
+";
+
+#[test]
+fn scope_config_parses() {
+    let config = Config::from_str(SHELL_SCOPE).unwrap();
+    assert!(config.rules.is_empty());
+    assert_eq!(config.scopes.len(), 1);
+    let scope = &config.scopes[0];
+    assert_eq!(scope.id, "sh");
+    assert_eq!(scope.end.as_deref(), Some("^```$"));
+    assert_eq!(scope.rules.len(), 1);
+    assert_eq!(scope.rules[0].id, "no-sudo");
+}
+
+#[test]
+fn scope_without_end_is_allowed() {
+    let yaml = "version: 1\nscopes:\n  - id: s\n    start: 'X'\n    rules:\n      - id: r\n        pattern: x\n        message: m\n";
+    let config = Config::from_str(yaml).unwrap();
+    assert!(config.scopes[0].end.is_none());
+}
+
+#[test]
+fn scope_errors() {
+    // missing start
+    let e = err("version: 1\nscopes:\n  - id: s\n    rules:\n      - id: r\n        pattern: x\n        message: m\n");
+    assert!(e.contains("scope 0 ('s'): missing `start` key"), "{e}");
+
+    // invalid start regex
+    let e = err("version: 1\nscopes:\n  - id: s\n    start: '('\n    rules:\n      - id: r\n        pattern: x\n        message: m\n");
+    assert!(e.contains("scope 0 ('s'): invalid start pattern"), "{e}");
+
+    // unknown key
+    let e = err("version: 1\nscopes:\n  - id: s\n    start: x\n    scoped: true\n    rules:\n      - id: r\n        pattern: x\n        message: m\n");
+    assert!(e.contains("unknown key `scoped`"), "{e}");
+
+    // scope with no rules
+    let e = err("version: 1\nscopes:\n  - id: s\n    start: x\n");
+    assert!(e.contains("scope has no `rules`"), "{e}");
+
+    // empty scope id
+    let e = err("version: 1\nscopes:\n  - id: ''\n    start: x\n    rules:\n      - id: r\n        pattern: x\n        message: m\n");
+    assert!(e.contains("`id` must be a non-empty string"), "{e}");
+}
+
+#[test]
+fn scope_and_rule_ids_share_one_namespace() {
+    // scope id colliding with a global rule id
+    let e = err("version: 1\nrules:\n  - id: dup\n    pattern: x\n    message: m\nscopes:\n  - id: dup\n    start: x\n    rules:\n      - id: r\n        pattern: x\n        message: m\n");
+    assert!(e.contains("scope 0 ('dup'): duplicate id `dup`"), "{e}");
+
+    // rule id colliding with a previous scope's rule id
+    let e = err("version: 1\nscopes:\n  - id: s\n    start: x\n    rules:\n      - id: dup\n        pattern: x\n        message: m\nrules:\n  - id: dup\n    pattern: x\n    message: m\n");
+    assert!(e.contains("rule 0 ('dup'): duplicate id `dup`"), "{e}");
+}
+
+#[test]
+fn scoped_rule_errors_name_the_scope() {
+    let e = err("version: 1\nscopes:\n  - id: sh\n    start: x\n    rules:\n      - id: r\n        pattern: '('\n        message: m\n");
+    assert!(e.contains("scope 'sh' rule 0 ('r'): invalid pattern"), "{e}");
+}
+
+#[test]
+fn global_rules_stay_valid_with_scopes_present() {
+    let yaml = format!("{SHELL_SCOPE}\nrules:\n  - id: g\n    pattern: y\n    message: m\n");
+    let config = Config::from_str(&yaml).unwrap();
+    assert_eq!(config.rules.len(), 1);
+    assert_eq!(config.scopes.len(), 1);
 }
