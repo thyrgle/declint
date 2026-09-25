@@ -68,7 +68,9 @@ mod linter;
 mod scopes;
 mod template;
 
-pub use callback::{Callbacks, CallbackRef, Decision, MatchCallback, MatchContext};
+pub use callback::{
+    Callbacks, CallbackRef, Decision, MatchCallback, MatchContext, MatchParser, RawMatch,
+};
 pub use config::{Config, ConfigError, Rule, Scope, SUPPORTED_VERSION};
 pub use config_set::{ConfigSet, NamedConfig, ScopeEntry, CONFIG_DIR, CONFIG_FILE, LEGACY_CONFIG_FILE};
 pub use lang::language_from_extension;

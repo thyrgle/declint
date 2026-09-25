@@ -74,6 +74,49 @@ pub trait MatchCallback: Send + Sync {
     fn evaluate(&self, ctx: &MatchContext) -> Result<Decision, String>;
 }
 
+/// One match found by a [`MatchParser`], in coordinates relative to the
+/// scanned text (add the scan offset for absolute positions).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawMatch {
+    /// Byte offset of the match start, relative to the scanned text.
+    pub start: usize,
+    /// Byte offset just past the match, relative to the scanned text.
+    pub finish: usize,
+    /// Free-form capture data: named groups for templates and callbacks.
+    pub captures: Vec<(String, String)>,
+}
+
+impl RawMatch {
+    /// Creates a match with the given span and no captures.
+    pub fn new(start: usize, finish: usize) -> Self {
+        Self {
+            start,
+            finish,
+            captures: Vec::new(),
+        }
+    }
+
+    /// Adds a named capture.
+    pub fn with_capture(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.captures.push((name.into(), value.into()));
+        self
+    }
+}
+
+/// A custom matcher: finds every hit for a rule in one scan unit (the
+/// whole file for global rules, a scope region for scoped rules).
+///
+/// This is the escape hatch beyond regexes — with the whole text in
+/// hand, a parser can count duplicates, flag absent constructs, or
+/// hand-roll any matching logic. Must be pure: same `(text, offset)`,
+/// same matches.
+pub trait MatchParser: Send + Sync {
+    /// Finds all matches. An `Err` surfaces as an `error`-severity
+    /// diagnostic naming the rule — the lint run itself is never
+    /// affected.
+    fn find(&self, text: &str, offset: usize) -> Result<Vec<RawMatch>, String>;
+}
+
 struct NoopCallback;
 
 impl MatchCallback for NoopCallback {
@@ -82,11 +125,14 @@ impl MatchCallback for NoopCallback {
     }
 }
 
-/// A set of registered callbacks, keyed by name or by
-/// [`CallbackRef`] identity (inline source / file path).
+/// A set of registered callbacks and parsers, keyed by name or by
+/// [`CallbackRef`] identity (inline source / file path). Callback and
+/// parser keys live in separate namespaces — the same name can name a
+/// callback for one rule and a parser for another.
 #[derive(Default)]
 pub struct Callbacks {
-    map: HashMap<String, Arc<dyn MatchCallback>>,
+    callbacks: HashMap<String, Arc<dyn MatchCallback>>,
+    parsers: HashMap<String, Arc<dyn MatchParser>>,
 }
 
 impl Callbacks {
@@ -98,7 +144,8 @@ impl Callbacks {
     /// Registers a callback under a plain name (what a rule's
     /// `callback: name` refers to).
     pub fn register(&mut self, name: impl Into<String>, callback: Arc<dyn MatchCallback>) {
-        self.map.insert(format!("name:{}", name.into()), callback);
+        self.callbacks
+            .insert(format!("cb:name:{}", name.into()), callback);
     }
 
     /// Registers a convenience callback that allows every match of the
@@ -107,40 +154,59 @@ impl Callbacks {
         self.register(name, Arc::new(NoopCallback));
     }
 
-    /// Registers the implementation for an inline/file reference — the
-    /// loader's entry point (e.g. `declint-lua`).
+    /// Registers the callback implementation for an inline/file
+    /// reference — the loader's entry point (e.g. `declint-lua`).
     pub fn register_ref(&mut self, reference: &CallbackRef, callback: Arc<dyn MatchCallback>) {
-        self.map.insert(key_of(reference), callback);
+        self.callbacks.insert(key_of(reference, "cb"), callback);
     }
 
-    /// Looks up the implementation for a rule's reference.
+    /// Registers a parser under a plain name (what a rule's
+    /// `parser: name` refers to).
+    pub fn register_parser(&mut self, name: impl Into<String>, parser: Arc<dyn MatchParser>) {
+        self.parsers
+            .insert(format!("parser:name:{}", name.into()), parser);
+    }
+
+    /// Registers the parser implementation for an inline/file reference.
+    pub fn register_parser_ref(&mut self, reference: &CallbackRef, parser: Arc<dyn MatchParser>) {
+        self.parsers.insert(key_of(reference, "parser"), parser);
+    }
+
+    /// Looks up the callback for a rule's reference.
     pub fn resolve(&self, reference: &CallbackRef) -> Option<Arc<dyn MatchCallback>> {
-        self.map.get(&key_of(reference)).cloned()
+        self.callbacks.get(&key_of(reference, "cb")).cloned()
     }
 
-    /// Whether any callbacks are registered at all.
+    /// Looks up the parser for a rule's reference.
+    pub fn resolve_parser(&self, reference: &CallbackRef) -> Option<Arc<dyn MatchParser>> {
+        self.parsers.get(&key_of(reference, "parser")).cloned()
+    }
+
+    /// Whether anything (callback or parser) is registered at all.
     pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
+        self.callbacks.is_empty() && self.parsers.is_empty()
     }
 }
 
 impl fmt::Debug for Callbacks {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Callbacks")
-            .field("count", &self.map.len())
+            .field("callbacks", &self.callbacks.len())
+            .field("parsers", &self.parsers.len())
             .finish()
     }
 }
 
-fn key_of(reference: &CallbackRef) -> String {
+fn key_of(reference: &CallbackRef, kind: &str) -> String {
     match reference {
-        CallbackRef::Name(name) => format!("name:{name}"),
-        CallbackRef::File { path } => format!("file:{path}"),
-        CallbackRef::Inline { source } => format!("inline:{source}"),
+        CallbackRef::Name(name) => format!("{kind}:name:{name}"),
+        CallbackRef::File { path } => format!("{kind}:file:{path}"),
+        CallbackRef::Inline { source } => format!("{kind}:inline:{source}"),
     }
 }
 
-/// A rule's reference to its callback, as written in the config.
+/// A rule's reference to its callback or parser, as written in the
+/// config.
 ///
 /// Classification of the `callback:` string:
 ///

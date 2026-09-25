@@ -134,6 +134,30 @@ impl Template {
         }
         out
     }
+
+    /// Renders the template from pre-collected capture pairs — named
+    /// groups by name, numbered groups as `"1"`, `"2"`, ... Used by
+    /// parser rules, whose captures do not come from a regex.
+    pub fn render_with(&self, match_text: &str, captures: &[(String, String)]) -> String {
+        let mut out = String::new();
+        for part in &self.0 {
+            match part {
+                Part::Text(t) => out.push_str(t),
+                Part::Placeholder(name) => {
+                    if name == "match" {
+                        out.push_str(match_text);
+                        continue;
+                    }
+                    if let Some((_, value)) =
+                        captures.iter().find(|(key, _)| key == name)
+                    {
+                        out.push_str(value);
+                    }
+                }
+            }
+        }
+        out
+    }
 }
 
 fn known_groups(regex: &regex::Regex) -> String {

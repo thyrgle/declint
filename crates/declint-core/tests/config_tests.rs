@@ -55,12 +55,29 @@ fn missing_rule_keys_are_reported() {
     let e = err("version: 1\nrules:\n  - pattern: x\n    message: m\n");
     assert!(e.contains("rule 0: missing `id` key"), "{e}");
     let e = err("version: 1\nrules:\n  - id: r\n    message: m\n");
-    assert!(e.contains("missing `pattern` key"), "{e}");
+    assert!(
+        e.contains("rule 0 ('r'): rule must have a `pattern` or a `parser`"),
+        "{e}"
+    );
     let e = err("version: 1\nrules:\n  - id: r\n    pattern: x\n");
     assert!(
         e.contains("rule 0 ('r'): rule must have a `message`"),
         "{e}"
     );
+}
+
+#[test]
+fn pattern_and_parser_are_mutually_exclusive() {
+    let e = err(
+        "version: 1\nrules:\n  - id: r\n    pattern: x\n    parser: p\n    message: m\n",
+    );
+    assert!(e.contains("mutually exclusive"), "{e}");
+}
+
+#[test]
+fn parser_must_be_a_non_empty_string() {
+    let e = err("version: 1\nrules:\n  - id: r\n    parser: ''\n    message: m\n");
+    assert!(e.contains("`parser` must be a non-empty string"), "{e}");
 }
 
 #[test]

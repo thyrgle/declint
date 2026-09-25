@@ -57,15 +57,22 @@
 use std::sync::Arc;
 
 use declint_core::{
-    CallbackRef, Callbacks, ConfigError, ConfigSet, Decision, MatchCallback, MatchContext, Severity,
+    CallbackRef, Callbacks, ConfigError, ConfigSet, Decision, MatchCallback, MatchContext,
+    MatchParser, RawMatch, Severity,
 };
 use mlua::{Function, Lua, Value};
 
 /// Instructions a callback may execute per call before it is aborted.
-const INSTRUCTION_BUDGET: u32 = 1_000_000;
+const CALLBACK_INSTRUCTION_BUDGET: u32 = 1_000_000;
+
+/// Instructions a parser may execute per call — larger than the callback
+/// budget, because a parser sees (and scans) the whole text at once.
+/// Prefer `string.find`/`string.gmatch` (they run at C speed) over
+/// per-character Lua loops.
+const PARSER_INSTRUCTION_BUDGET: u32 = 10_000_000;
 
 /// The budget-abort message; used to recognize budget aborts.
-const BUDGET_MESSAGE: &str = "callback exceeded its instruction budget";
+const BUDGET_MESSAGE: &str = "exceeded its instruction budget";
 
 /// A compiled Lua callback.
 pub struct LuaCallback {
@@ -93,7 +100,7 @@ impl MatchCallback for LuaCallback {
         table.set("captures", captures).map_err(|e| e.to_string())?;
 
         lua.set_hook(
-            mlua::HookTriggers::new().every_nth_instruction(INSTRUCTION_BUDGET),
+            mlua::HookTriggers::new().every_nth_instruction(CALLBACK_INSTRUCTION_BUDGET),
             |_lua, _debug| Err(mlua::Error::RuntimeError(BUDGET_MESSAGE.to_string())),
         )
         .map_err(|e| e.to_string())?;
@@ -130,7 +137,7 @@ impl MatchCallback for LuaCallback {
                 let text = e.to_string();
                 if text.contains(BUDGET_MESSAGE) {
                     Err(format!(
-                        "exceeded its instruction budget of {INSTRUCTION_BUDGET} instructions \
+                        "exceeded its instruction budget of {CALLBACK_INSTRUCTION_BUDGET} instructions \
                          (possible infinite loop)"
                     ))
                 } else {
@@ -141,8 +148,91 @@ impl MatchCallback for LuaCallback {
     }
 }
 
-/// Compiles every inline and file callback in `set` and registers them
-/// in `callbacks`. File paths resolve relative to each config file.
+/// A compiled Lua parser: finds all matches for a rule in one call.
+///
+/// The snippet is `return function(text, offset) ... end` — `text` is
+/// the whole scan unit (the file for global rules, the region for
+/// scoped rules), `offset` its absolute byte position. It returns
+/// `nil` or a list of `{ start = , finish = , captures = { ... } }`
+/// tables with positions **relative to `text`**.
+pub struct LuaParser {
+    lua: Arc<Lua>,
+    function: Function,
+}
+
+impl MatchParser for LuaParser {
+    fn find(&self, text: &str, offset: usize) -> Result<Vec<RawMatch>, String> {
+        let lua = &self.lua;
+        lua.set_hook(
+            mlua::HookTriggers::new().every_nth_instruction(PARSER_INSTRUCTION_BUDGET),
+            |_lua, _debug| Err(mlua::Error::RuntimeError(BUDGET_MESSAGE.to_string())),
+        )
+        .map_err(|e| e.to_string())?;
+        let call = self.function.call::<Value>((text, offset));
+        lua.remove_hook();
+        let result = call.map_err(|e| {
+            let text = e.to_string();
+            if text.contains(BUDGET_MESSAGE) {
+                format!(
+                    "exceeded its instruction budget of {PARSER_INSTRUCTION_BUDGET} instructions \
+                     (possible infinite loop)"
+                )
+            } else {
+                text
+            }
+        })?;
+
+        let Value::Nil = result else {
+            let Value::Table(entries) = result else {
+                return Err(format!(
+                    "parser must return nil or a list of matches (returned {})",
+                    result.type_name()
+                ));
+            };
+            let mut matches = Vec::new();
+            for entry in entries.sequence_values::<Value>() {
+                let entry = entry.map_err(|e| e.to_string())?;
+                let Value::Table(entry) = entry else {
+                    return Err(format!(
+                        "parser matches must be tables (found {})",
+                        entry.type_name()
+                    ));
+                };
+                let start: usize = entry.get("start").map_err(|e| e.to_string())?;
+                let finish: usize = entry.get("finish").map_err(|e| e.to_string())?;
+                if start >= finish {
+                    return Err(format!(
+                        "parser match has an empty or reversed span \
+                         (start {start} >= finish {finish})"
+                    ));
+                }
+                let mut raw = RawMatch::new(start, finish);
+                match entry.get::<Value>("captures") {
+                    Ok(Value::Nil) | Err(_) => {}
+                    Ok(Value::Table(captures)) => {
+                        for pair in captures.pairs::<String, String>() {
+                            let (name, value) = pair.map_err(|e| e.to_string())?;
+                            raw = raw.with_capture(name, value);
+                        }
+                    }
+                    Ok(other) => {
+                        return Err(format!(
+                            "`captures` must be a table of strings (found {})",
+                            other.type_name()
+                        ));
+                    }
+                }
+                matches.push(raw);
+            }
+            return Ok(matches);
+        };
+        Ok(Vec::new())
+    }
+}
+
+/// Compiles every inline and file callback and parser in `set` and
+/// registers them in `callbacks`. File paths resolve relative to each
+/// config file.
 ///
 /// Syntax errors and unreadable files are reported with the config file
 /// and rule id; nothing partial is registered on failure — call sites
@@ -161,32 +251,28 @@ pub fn attach(set: &ConfigSet, callbacks: &mut Callbacks) -> Result<(), ConfigEr
                          label: &dyn Fn(&declint_core::Rule) -> String|
          -> Result<(), ConfigError> {
             for rule in rules {
-                let Some(reference) = &rule.callback else {
-                    continue;
-                };
-                let compiled = match reference {
-                    CallbackRef::Name(_) => continue,
-                    CallbackRef::Inline { source } => {
-                        compile(&lua, source.clone()).map_err(|e| invalid(label(rule), &e))?
-                    }
-                    CallbackRef::File { path } => {
-                        let file = base.join(path);
-                        let source = std::fs::read_to_string(&file).map_err(|e| {
-                            ConfigError::new(format!(
-                                "{}: cannot read callback file: {e}",
-                                label(rule)
-                            ))
-                        })?;
-                        compile(&lua, source).map_err(|e| invalid(label(rule), &e))?
-                    }
-                };
-                callbacks.register_ref(
-                    reference,
-                    Arc::new(LuaCallback {
-                        lua: Arc::clone(&lua),
-                        function: compiled,
-                    }),
-                );
+                if let Some(reference) = &rule.callback {
+                    let compiled = compile_ref(&lua, &base, reference)
+                        .map_err(|e| invalid(label(rule), &e, "callback"))?;
+                    callbacks.register_ref(
+                        reference,
+                        Arc::new(LuaCallback {
+                            lua: Arc::clone(&lua),
+                            function: compiled,
+                        }),
+                    );
+                }
+                if let Some(reference) = &rule.parser {
+                    let compiled = compile_ref(&lua, &base, reference)
+                        .map_err(|e| invalid(label(rule), &e, "parser"))?;
+                    callbacks.register_parser_ref(
+                        reference,
+                        Arc::new(LuaParser {
+                            lua: Arc::clone(&lua),
+                            function: compiled,
+                        }),
+                    );
+                }
             }
             Ok(())
         };
@@ -208,6 +294,23 @@ pub fn attach(set: &ConfigSet, callbacks: &mut Callbacks) -> Result<(), ConfigEr
     Ok(())
 }
 
+/// Compiles one inline/file snippet reference into its callback function.
+/// `Name` references belong to hosts, not to Lua — skipped here.
+fn compile_ref(
+    lua: &Lua,
+    base: &std::path::Path,
+    reference: &CallbackRef,
+) -> Result<Function, mlua::Error> {
+    match reference {
+        CallbackRef::Name(_) => unreachable!("name references are host-registered"),
+        CallbackRef::Inline { source } => compile(lua, source.clone()),
+        CallbackRef::File { path } => {
+            let source = std::fs::read_to_string(base.join(path))?;
+            compile(lua, source)
+        }
+    }
+}
+
 fn shown(path: &std::path::Path) -> String {
     let text = path.display().to_string();
     if text.is_empty() {
@@ -217,8 +320,8 @@ fn shown(path: &std::path::Path) -> String {
     }
 }
 
-fn invalid(label: String, e: &mlua::Error) -> ConfigError {
-    ConfigError::new(format!("{label}: invalid callback: {e}"))
+fn invalid(label: String, e: &mlua::Error, kind: &str) -> ConfigError {
+    ConfigError::new(format!("{label}: invalid {kind}: {e}"))
 }
 
 /// Compiles a snippet into the callback function. A snippet is a chunk
@@ -419,5 +522,150 @@ rules:
         attach(&set, &mut callbacks).unwrap();
         assert!(Linter::new(config, &callbacks).is_ok());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod parser_tests {
+    use super::*;
+    use declint_core::{DocInfo, Linter};
+
+    fn linter_with(yaml: &str) -> Linter {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("declint-lua-{}-{n}-p", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".declint.yaml"), yaml).unwrap();
+        let set = ConfigSet::discover(&dir).unwrap();
+        let mut callbacks = Callbacks::new();
+        attach(&set, &mut callbacks).unwrap();
+        Linter::new(set.configs()[0].config.clone(), &callbacks).unwrap()
+    }
+
+    /// The canonical parser-rule demo: INI duplicate keys. Regex rules
+    /// cannot count; a parser rule sees the whole file at once.
+    fn duplicate_keys_yaml() -> String {
+        "\
+version: 1
+rules:
+  - id: duplicate-keys
+    parser: |
+      return function(text, offset)
+        local seen, matches = {}, {}
+        local pos = 1
+        while pos <= #text do
+          local nl = text:find('\\n', pos, true) or (#text + 1)
+          local line = text:sub(pos, nl - 1)
+          local key = line:match('^%s*([%w-]+)%s*=')
+          if key and seen[key] then
+            matches[#matches + 1] = {
+              start = offset + pos - 1, finish = offset + pos - 1 + #line,
+              captures = { key = key, count = tostring(seen[key] + 1) },
+            }
+          end
+          if key then seen[key] = (seen[key] or 0) + 1 end
+          pos = nl + 1
+        end
+        return matches
+      end
+    message: \"'{key}' defined {count} times\"
+    severity: error
+"
+        .to_string()
+    }
+
+    #[test]
+    fn duplicate_keys_are_detectable_at_last() {
+        let linter = linter_with(&duplicate_keys_yaml());
+        let v = linter.lint_in(
+            DocInfo { path: "app.ini", language: "ini" },
+            "[server]\nport = 1\nport = 2\nport = 3\n",
+        );
+        // port appears 3 times: the 2nd and 3rd definitions are flagged,
+        // each stating how many times the key is now defined.
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].message, "'port' defined 2 times");
+        assert_eq!(v[1].message, "'port' defined 3 times");
+        assert_eq!(v[0].span.to_range(), 18..26);
+        assert_eq!(v[1].span.to_range(), 27..35);
+    }
+
+    #[test]
+    fn parser_returning_nil_finds_nothing() {
+        let linter = linter_with(
+            "version: 1\nrules:\n  - id: r\n    parser: |\n      return function(t, o) return nil end\n    message: m\n",
+        );
+        assert!(linter.lint("anything").is_empty());
+    }
+
+    #[test]
+    fn parser_runaway_loop_hits_the_budget() {
+        let linter = linter_with(
+            "version: 1\nrules:\n  - id: r\n    parser: |\n      return function(t, o) while true do end end\n    message: m\n",
+        );
+        let v = linter.lint("x");
+        assert_eq!(v[0].severity, Severity::Error);
+        assert!(
+            v[0].message.contains("instruction budget"),
+            "{}",
+            v[0].message
+        );
+    }
+
+    #[test]
+    fn invalid_parser_return_shapes_are_reported() {
+        let linter = linter_with(
+            "version: 1\nrules:\n  - id: r\n    parser: |\n      return function(t, o) return { 42 } end\n    message: m\n",
+        );
+        let v = linter.lint("x");
+        assert!(v[0].message.contains("matches must be tables"), "{}", v[0].message);
+
+        let linter = linter_with(
+            "version: 1\nrules:\n  - id: r\n    parser: |\n      return function(t, o) return { { start = 5, finish = 2 } } end\n    message: m\n",
+        );
+        let v = linter.lint("x");
+        assert!(
+            v[0].message.contains("empty or reversed span"),
+            "{}",
+            v[0].message
+        );
+
+        let linter = linter_with(
+            "version: 1\nrules:\n  - id: r\n    parser: |\n      return function(t, o) return 'nope' end\n    message: m\n",
+        );
+        let v = linter.lint("x");
+        assert!(
+            v[0].message.contains("must return nil or a list"),
+            "{}",
+            v[0].message
+        );
+    }
+
+    #[test]
+    fn parser_syntax_error_is_a_config_error() {
+        let dir = std::env::temp_dir().join(format!("declint-lua-{}-psyn", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(".declint.yaml"),
+            "version: 1\nrules:\n  - id: r\n    parser: 'return function(t, o) returnnil end'\n    message: m\n",
+        )
+        .unwrap();
+        let set = ConfigSet::discover(&dir).unwrap();
+        let mut callbacks = Callbacks::new();
+        let e = attach(&set, &mut callbacks).unwrap_err();
+        assert!(e.to_string().contains("rule 'r'"), "{e}");
+        assert!(e.to_string().contains("invalid parser"), "{e}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn parser_template_interpolates_parser_captures() {
+        let linter = linter_with(
+            "version: 1\nrules:\n  - id: r\n    parser: |\n      return function(t, o)\n        return { { start = 0, finish = 3, captures = { who = 'parser', n = '7' } } }\n      end\n    message: '{who} found {n} things'\n",
+        );
+        let v = linter.lint("abc def");
+        assert_eq!(v[0].message, "parser found 7 things");
     }
 }

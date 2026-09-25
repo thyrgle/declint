@@ -87,7 +87,12 @@ languages: [markdown, sh] # optional; editor language ids this config applies
                           # to (exact match; missing = all languages)
 rules:                    # file-global rules; optional if `scopes` is present
   - id: rule-name         # required; unique; becomes the diagnostic's code
-    pattern: '\t+'        # required; Rust `regex` crate syntax (no lookaround)
+    pattern: '\t+'        # required unless `parser` is present; Rust `regex`
+                          # syntax (no lookaround)
+    parser: |             # instead of `pattern`: a Lua function that sees
+      return function(text, offset)  # the whole file — see "Parser rules"
+        return nil
+      end
     message: "..."        # required unless `callback` is present; see templates
     severity: warning     # optional: error | warning | info | hint (default warning)
     callback: |           # optional; Lua snippet or `checks/foo.lua` path,
@@ -159,6 +164,64 @@ Rust embedders can skip Lua entirely: implement
 `declint_core::MatchCallback` and register it by name
 (`Callbacks::register("my_check", ...)`), then reference it in YAML as
 `callback: my_check`.
+
+### Parser rules
+
+Regex rules match one pattern at a time and can't remember previous
+matches. When a rule needs the whole file in hand — counting duplicates,
+flagging absent constructs, hand-rolled matching — replace `pattern`
+with a `parser`: a Lua function called **once per scan unit** that
+returns every match. (The two keys are mutually exclusive; one is
+required.)
+
+```yaml
+rules:
+  - id: duplicate-keys
+    parser: |
+      return function(text, offset)
+        -- text: the whole file (or the scope region, for scoped rules)
+        -- offset: text's absolute byte position in the file
+        local seen, matches = {}, {}
+        local pos = 1
+        while pos <= #text do
+          local nl = text:find("\n", pos, true) or (#text + 1)
+          local line = text:sub(pos, nl - 1)
+          local key = line:match("^%s*([%w-]+)%s*=")
+          if key and seen[key] then
+            matches[#matches + 1] = {
+              start = offset + pos - 1, finish = offset + pos - 1 + #line,
+              captures = { key = key, count = tostring(seen[key] + 1) },
+            }
+          end
+          if key then seen[key] = (seen[key] or 0) + 1 end
+          pos = nl + 1
+        end
+        return matches
+      end
+    message: "'{key}' defined {count} times"
+    severity: error
+```
+
+The contract:
+
+* Return `nil` (no matches) or a list of
+  `{ start = , finish = , captures = { name = "..." } }` tables, with
+  positions **relative to `text`**; they are converted to absolute
+  positions for you.
+* Each returned match then flows through the standard pipeline — its
+  `captures` interpolate into the message template and are visible to
+  the rule's `callback` (if any) as `c.captures`.
+* Parsers run under a larger instruction budget than callbacks (10
+  million instructions per call). Prefer `string.find`/`string.gmatch`
+  — they execute at C speed; per-character Lua loops do not.
+* Like callbacks, parsers must be pure: same text in, same matches out.
+* Rust embedders: implement `declint_core::MatchParser` and register it
+  with `Callbacks::register_parser("name", ...)`, then reference
+  `parser: name` in YAML.
+
+Parser rules close the gaps the tutorials' "ceiling" sections describe:
+duplicates, absence rules ("every function must have a docstring"), and
+custom matching that no regex dialect could express.
 
 ### Scoped rules
 
@@ -238,6 +301,7 @@ filter, style, and (later) suppress per rule.
 
 ## Status
 
-0.4.0 — Lua match callbacks (inline and file), hidden configs with
+0.5.0 — Lua parser rules (whole-file matchers for duplicates, absence
+rules, and custom matching), Lua match callbacks, hidden configs with
 directory discovery, per-language configs, scoped rules; the schema is
 versioned to keep future configs compatible.

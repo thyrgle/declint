@@ -280,21 +280,27 @@ editor.
 
 ## 7. The ceiling, precisely
 
-Every limit below is a design fact, not a missing feature, and knowing
-them tells you when to reach for something else:
+Every limit below is a design fact, not a missing feature — though some
+walls moved in 0.5.0. Knowing them tells you when to reach for
+something else:
 
-| You want... | Why declint can't | Reach for |
+| You want... | Status | Reach for |
 |---|---|---|
-| Lookaround (`(?<!=)`) | the `regex` crate has none, by design (linear time) | character-class approximations, or `fancy-regex` upstream |
-| Duplicate-key / duplicate-def detection | callbacks are pure, one match, no memory | a parser: [increparse](../../increparse) |
-| "Every function must have a docstring" | sub-rules fire on *matches*; absence of a match is unobservable | a real linter with an AST (ruff) |
-| Brace-matched regions (JS functions) | `end:` is a regex, not a paren matcher | indentation-based languages, or rigid formatting (`end: '^\}'`) |
-| Type-aware rules | regex sees bytes | pyright/mypy, full stop |
+| Lookaround (`(?<!=)`) | regex rules can't; **parser rules** can hand-roll any matching | parser rules, or `fancy-regex` upstream |
+| Duplicate-key / duplicate-def detection | regex rules can't count; **parser rules** see the whole file at once | parser rules (see the README), or a parser for structure |
+| "Every function must have a docstring" | sub-rules fire on *matches*; **parser rules** can emit violations for non-matches | parser rules, or a real AST linter (ruff) |
+| Brace-matched regions (JS functions) | scope `end:` is a regex, not a paren matcher — a parser rule can *check* brace depth, but scopes themselves stay regex-cut | indentation-based languages, or rigid formatting (`end: '^\}'`) |
+| Type-aware rules | regex and Lua see bytes, not types | pyright/mypy, full stop |
+
+The pattern to notice: parser rules push the ceiling back by putting
+*you* in charge of matching — but the code is still per-file text
+analysis in Lua. Name resolution, import graphs, type inference: those
+are parsers, not patterns, and that's the border of this tool.
 
 ## Where to go from here
 
 * The **README** has the full reference — config schema, scope
-  semantics, the callback contract, discovery order.
+  semantics, the callback contract, parser rules, discovery order.
 * [`examples/python/`](../examples/python) is this guide's finished
   setup: `cd` in and run `declint check app.py`.
 * The rules here would sit happily next to the INI ruleset from

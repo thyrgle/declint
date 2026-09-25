@@ -289,8 +289,12 @@ Two safety rails, so a bad callback can't ruin your day:
 
 Callbacks are pure — they see one match at a time and can't remember
 previous ones. Counting duplicate keys, for example, is beyond a
-regex-per-match engine by design; that's a job for a parser (see
-[increparse](../../increparse)).
+regex-per-match engine by design. For those cases, a rule can swap its
+`pattern` for a **`parser`** — a Lua function that sees the whole file
+at once and returns all its own matches (see ["Parser
+rules"](../README.md#parser-rules) in the README). And when even
+programmed matching isn't enough — real syntax, real scope analysis —
+that's a job for a parser ([increparse](../../increparse)).
 
 ## 5. Point it at a language, run it in your editor
 

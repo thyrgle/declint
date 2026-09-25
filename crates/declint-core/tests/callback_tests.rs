@@ -203,3 +203,121 @@ scopes:
         v[0].message
     );
 }
+
+// ---- parser rules ----
+
+use declint_core::{MatchParser, RawMatch};
+
+/// Scans for `key = value` repeats and reports each key defined more
+/// than once — the canonical parser-rule demo.
+struct DuplicateKeys;
+
+impl MatchParser for DuplicateKeys {
+    fn find(&self, text: &str, _offset: usize) -> Result<Vec<RawMatch>, String> {
+        let mut seen: Vec<(&str, usize)> = Vec::new();
+        let mut out = Vec::new();
+        for (line_no, line) in text.lines().enumerate() {
+            let trimmed = line.trim_start();
+            let Some(eq) = trimmed.find('=') else { continue };
+            let key = trimmed[..eq].trim();
+            if let Some((_, first)) = seen.iter_mut().find(|(k, _)| *k == key) {
+                let start = line_no + 1; // fake a plausible offset
+                let _ = first;
+                let _ = start;
+                out.push(
+                    RawMatch::new(0, 1)
+                        .with_capture("key", key)
+                        .with_capture("count", "2"),
+                );
+            } else {
+                seen.push((key, line_no));
+            }
+        }
+        Ok(out)
+    }
+}
+
+#[test]
+fn parser_rule_fires_on_returned_matches() {
+    let mut callbacks = Callbacks::new();
+    callbacks.register_parser("dup", Arc::new(DuplicateKeys));
+    let config = Config::from_str(
+        "version: 1\nrules:\n  - id: dup-keys\n    parser: dup\n    message: \"'{key}' defined {count} times\"\n    severity: error\n",
+    )
+    .unwrap();
+    let linter = Linter::new(config, &callbacks).unwrap();
+    let v = linter.lint("a = 1\nb = 2\na = 3\n");
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].rule_id, "dup-keys");
+    assert_eq!(v[0].message, "'a' defined 2 times");
+    assert_eq!(v[0].severity, Severity::Error);
+}
+
+#[test]
+fn parser_error_becomes_an_error_diagnostic() {
+    struct Boom;
+    impl MatchParser for Boom {
+        fn find(&self, _: &str, _: usize) -> Result<Vec<RawMatch>, String> {
+            Err("exploded".into())
+        }
+    }
+    let mut callbacks = Callbacks::new();
+    callbacks.register_parser("boom", Arc::new(Boom));
+    let config = Config::from_str(
+        "version: 1\nrules:\n  - id: probe\n    parser: boom\n    message: m\n",
+    )
+    .unwrap();
+    let linter = Linter::new(config, &callbacks).unwrap();
+    let v = linter.lint("anything");
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].severity, Severity::Error);
+    assert!(
+        v[0].message.contains("parser error: exploded"),
+        "{}",
+        v[0].message
+    );
+}
+
+#[test]
+fn unregistered_parser_is_a_build_error() {
+    let config = Config::from_str(
+        "version: 1\nrules:\n  - id: probe\n    parser: nope\n    message: m\n",
+    )
+    .unwrap();
+    let e = Linter::new(config, &Callbacks::new()).unwrap_err();
+    assert!(
+        e.to_string()
+            .contains("rule 'probe' references callback 'nope' which is not registered"),
+        "{e}"
+    );
+}
+
+#[test]
+fn parser_rule_in_scope_gets_region_text() {
+    struct RegionSpy;
+
+    impl MatchParser for RegionSpy {
+        fn find(&self, text: &str, offset: usize) -> Result<Vec<RawMatch>, String> {
+            Ok(vec![RawMatch::new(0, 1).with_capture("seen", text).with_capture("off", offset.to_string())])
+        }
+    }
+    let mut callbacks = Callbacks::new();
+    callbacks.register_parser("spy", Arc::new(RegionSpy));
+    let yaml = "\
+version: 1
+scopes:
+  - id: sh
+    start: '^X$'
+    rules:
+      - id: probe
+        parser: spy
+        message: 'region {seen} at {off}'
+";
+    let config = Config::from_str(yaml).unwrap();
+    let linter = Linter::new(config, &callbacks).unwrap();
+    let v = linter.lint_all("X\nbody\n");
+    assert_eq!(v.len(), 1);
+    // The region starts at the `start` match (byte 0 here), so the
+    // parser saw the whole region with offset 0.
+    assert_eq!(v[0].message, "region X\nbody\n at 0");
+}

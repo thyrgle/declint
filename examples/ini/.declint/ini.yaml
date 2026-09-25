@@ -24,6 +24,31 @@ rules:
         return { message = "key '" .. key .. "' should be kebab-case" }
       end
 
+  # A parser rule: regex rules can't count, so duplicate keys need a
+  # function that sees the whole file at once.
+  - id: duplicate-keys
+    parser: |
+      return function(text, offset)
+        local seen, matches = {}, {}
+        local pos = 1
+        while pos <= #text do
+          local nl = text:find("\n", pos, true) or (#text + 1)
+          local line = text:sub(pos, nl - 1)
+          local key = line:match("^%s*([%w-]+)%s*=")
+          if key and seen[key] then
+            matches[#matches + 1] = {
+              start = offset + pos - 1, finish = offset + pos - 1 + #line,
+              captures = { key = key, count = tostring(seen[key] + 1) },
+            }
+          end
+          if key then seen[key] = (seen[key] or 0) + 1 end
+          pos = nl + 1
+        end
+        return matches
+      end
+    message: "'{key}' defined {count} times"
+    severity: error
+
 scopes:
   # Rules for [server] sections: the port must parse as a number in
   # 1-65535. The region spans from the [server] header to the next

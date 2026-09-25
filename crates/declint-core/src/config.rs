@@ -11,6 +11,16 @@ use crate::callback::CallbackRef;
 use crate::template::Template;
 use crate::Severity;
 
+/// How a rule finds its matches: a compiled regex (the default) or a
+/// registered parser function (see [`Rule::parser`]).
+#[derive(Debug, Clone)]
+pub(crate) enum Matcher {
+    /// `pattern:` — compiled at config-load time.
+    Regex(regex::Regex),
+    /// `parser:` — resolved against the registry at linter build time.
+    Parser,
+}
+
 /// The config schema version this declint understands.
 pub const SUPPORTED_VERSION: u64 = 1;
 
@@ -124,7 +134,8 @@ pub struct Rule {
     /// what suppressions (a future feature) will name. Unique across all
     /// global rules and every scope's rules.
     pub id: String,
-    /// The pattern, as written in the config.
+    /// The pattern, as written in the config. Empty when the rule uses a
+    /// `parser` instead.
     pub pattern: String,
     /// How serious a hit is (default: [`Severity::Warning`]).
     pub severity: Severity,
@@ -134,9 +145,12 @@ pub struct Rule {
     pub message: Option<Template>,
     /// The rule's callback reference, if any.
     pub callback: Option<CallbackRef>,
-    /// The compiled pattern — construction only succeeds when this is
-    /// valid.
-    pub(crate) regex: regex::Regex,
+    /// The rule's parser reference, if any — mutually exclusive with
+    /// [`Rule::pattern`].
+    pub parser: Option<CallbackRef>,
+    /// How the rule finds matches — construction only succeeds when the
+    /// regex (if any) is valid.
+    pub(crate) matcher: Matcher,
 }
 
 /// One validated scope: a segmenter (`start`/`end`) plus the rules that
@@ -288,6 +302,17 @@ impl Config {
     }
 }
 
+impl Rule {
+    /// The capture-group names of the rule's regex, by group index.
+    /// Empty for parser rules (their capture names are free-form).
+    pub(crate) fn capture_names(&self) -> Vec<Option<&str>> {
+        match &self.matcher {
+            Matcher::Regex(regex) => regex.capture_names().collect(),
+            Matcher::Parser => Vec::new(),
+        }
+    }
+}
+
 /// Compiles a scope boundary pattern with multi-line mode forced on, so
 /// `^`/`$` anchor to lines.
 fn compile_boundary(pattern: &str) -> Result<regex::Regex, regex::Error> {
@@ -425,16 +450,55 @@ fn parse_rule(
 
     for key in map.keys() {
         if let Some(key) = key.as_str() {
-            if !matches!(key, "id" | "pattern" | "message" | "severity" | "callback") {
+            if !matches!(
+                key,
+                "id" | "pattern" | "message" | "severity" | "callback" | "parser"
+            ) {
                 return Err(at_rule(format!(
-                    "unknown key `{key}` (expected one of `id`, `pattern`, `message`, \
-                     `severity`, `callback`)"
+                    "unknown key `{key}` (expected one of `id`, `pattern`, `parser`, \
+                     `message`, `severity`, `callback`)"
                 )));
             }
         }
     }
 
     let missing = |key: &str| at_rule(format!("missing `{key}` key"));
+
+    let pattern_value = map.get(Value::from("pattern"));
+    let parser_value = map.get(Value::from("parser"));
+
+    // Exactly one of `pattern` / `parser` — the rule's matcher.
+    let (pattern, parser, matcher) = match (pattern_value, parser_value) {
+        (None, None) => {
+            return Err(at_rule(
+                "rule must have a `pattern` or a `parser` to find matches".into(),
+            ));
+        }
+        (Some(_), Some(_)) => {
+            return Err(at_rule(
+                "`pattern` and `parser` are mutually exclusive — a rule finds matches one way"
+                    .into(),
+            ));
+        }
+        (Some(value), None) => {
+            let pattern = value
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| at_rule("`pattern` must be a non-empty string".into()))?
+                .to_string();
+            let regex = regex::Regex::new(&pattern)
+                .map_err(|e| at_rule(format!("invalid pattern: {e}")))?;
+            (pattern, None, Matcher::Regex(regex))
+        }
+        (None, Some(value)) => {
+            let reference = value
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(CallbackRef::parse)
+                .ok_or_else(|| at_rule("`parser` must be a non-empty string".into()))?;
+            (String::new(), Some(reference), Matcher::Parser)
+        }
+    };
 
     let id_value = map.get(Value::from("id")).ok_or_else(|| missing("id"))?;
     let id = id_value
@@ -447,18 +511,6 @@ fn parse_rule(
             "duplicate id `{id}` — rule and scope ids share one namespace and must be unique"
         )));
     }
-
-    let pattern_value = map
-        .get(Value::from("pattern"))
-        .ok_or_else(|| missing("pattern"))?;
-    let pattern = pattern_value
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| at_rule("`pattern` must be a non-empty string".into()))?
-        .to_string();
-
-    let regex = regex::Regex::new(&pattern)
-        .map_err(|e| at_rule(format!("invalid pattern: {e}")))?;
 
     let callback = match map.get(Value::from("callback")) {
         None => None,
@@ -486,9 +538,13 @@ fn parse_rule(
                 .ok_or_else(|| at_rule("`message` must be a non-empty string".into()))?;
             let template = Template::parse(message_src)
                 .map_err(|e| at_rule(format!("invalid message template: {e}")))?;
-            template
-                .validate(&regex)
-                .map_err(|e| at_rule(format!("invalid message template: {e}")))?;
+            // Placeholder names are checked against the regex's capture
+            // groups; parser rules provide their own names at runtime.
+            if let Matcher::Regex(regex) = &matcher {
+                template
+                    .validate(regex)
+                    .map_err(|e| at_rule(format!("invalid message template: {e}")))?;
+            }
             Some(template)
         }
     };
@@ -512,7 +568,8 @@ fn parse_rule(
         severity,
         message,
         callback,
-        regex,
+        parser,
+        matcher,
     })
 }
 

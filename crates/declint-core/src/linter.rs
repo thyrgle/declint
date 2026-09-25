@@ -4,8 +4,10 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::callback::{Callbacks, Decision, MatchCallback, MatchContext};
-use crate::config::{Config, ConfigError, Rule, Scope};
+use crate::callback::{
+    Callbacks, Decision, MatchCallback, MatchContext, MatchParser, RawMatch,
+};
+use crate::config::{Config, ConfigError, Matcher, Rule, Scope};
 use crate::scopes;
 use crate::Severity;
 
@@ -108,51 +110,90 @@ pub struct Linter {
     /// Resolved rule callback implementations, keyed by rule id. Rules
     /// without a callback are absent.
     callbacks: HashMap<String, Arc<dyn MatchCallback>>,
+    /// Resolved rule parser implementations, keyed by rule id. Rules
+    /// with a regex matcher are absent.
+    parsers: HashMap<String, Arc<dyn MatchParser>>,
 }
 
 impl Linter {
     /// Compiles a config into a linter, resolving every rule's callback
-    /// against `callbacks`. Errors only when a rule references a callback
-    /// that is not registered — patterns themselves were validated at
-    /// config-load time.
+    /// and parser against `callbacks`. Errors when a rule references a
+    /// callback or parser that is not registered — patterns themselves
+    /// were validated at config-load time.
     pub fn new(config: Config, callbacks: &Callbacks) -> Result<Self, ConfigError> {
         let mut resolved = HashMap::new();
-        let mut reference = |rule: &Rule, scope: Option<&Scope>| -> Result<(), ConfigError> {
-            match &rule.callback {
-                None => Ok(()),
-                Some(r) => match callbacks.resolve(r) {
-                    Some(callback) => {
-                        resolved.insert(rule.id.clone(), callback);
-                        Ok(())
-                    }
-                    None => match scope {
-                        Some(scope) => Err(ConfigError::new(format!(
-                            "scope '{}' rule '{}' references {} which is not registered",
-                            scope.id,
-                            rule.id,
-                            r.describe()
-                        ))),
-                        None => Err(ConfigError::new(format!(
-                            "rule '{}' references {} which is not registered",
-                            rule.id,
-                            r.describe()
-                        ))),
-                    },
+        let mut resolved_parsers = HashMap::new();
+        fn place<T>(
+            slot: Option<&Arc<T>>,
+            resolved: &mut HashMap<String, Arc<T>>,
+            rule: &Rule,
+            scope: Option<&Scope>,
+            reference: &crate::callback::CallbackRef,
+        ) -> Result<(), ConfigError>
+        where
+            T: ?Sized + 'static,
+        {
+            match slot {
+                Some(implementation) => {
+                    resolved.insert(rule.id.clone(), Arc::clone(implementation));
+                    Ok(())
+                }
+                None => match scope {
+                    Some(scope) => Err(ConfigError::new(format!(
+                        "scope '{}' rule '{}' references {} which is not registered",
+                        scope.id,
+                        rule.id,
+                        reference.describe()
+                    ))),
+                    None => Err(ConfigError::new(format!(
+                        "rule '{}' references {} which is not registered",
+                        rule.id,
+                        reference.describe()
+                    ))),
                 },
             }
-        };
+        }
         for rule in &config.rules {
-            reference(rule, None)?;
+            if let Some(r) = &rule.callback {
+                place(callbacks.resolve(r).as_ref(), &mut resolved, rule, None, r)?;
+            }
+            if let Some(r) = &rule.parser {
+                place(
+                    callbacks.resolve_parser(r).as_ref(),
+                    &mut resolved_parsers,
+                    rule,
+                    None,
+                    r,
+                )?;
+            }
         }
         for scope in &config.scopes {
             for rule in &scope.rules {
-                reference(rule, Some(scope))?;
+                if let Some(r) = &rule.callback {
+                    place(
+                        callbacks.resolve(r).as_ref(),
+                        &mut resolved,
+                        rule,
+                        Some(scope),
+                        r,
+                    )?;
+                }
+                if let Some(r) = &rule.parser {
+                    place(
+                        callbacks.resolve_parser(r).as_ref(),
+                        &mut resolved_parsers,
+                        rule,
+                        Some(scope),
+                        r,
+                    )?;
+                }
             }
         }
         Ok(Self {
             rules: config.rules,
             scopes: config.scopes,
             callbacks: resolved,
+            parsers: resolved_parsers,
         })
     }
 
@@ -241,8 +282,11 @@ impl Linter {
 
     fn collect_global(&self, info: DocInfo<'_>, source: &str, out: &mut Vec<Violation>) {
         for rule in &self.rules {
-            let callback = self.callbacks.get(&rule.id).map(|a| a.as_ref());
-            collect_rule(rule, callback, info, source, source, 0, out);
+            let matchers = Matchers {
+                callback: self.callbacks.get(&rule.id).map(|a| a.as_ref()),
+                parser: self.parsers.get(&rule.id).map(|a| a.as_ref()),
+            };
+            collect_rule(rule, matchers, info, source, source, 0, out);
         }
     }
 
@@ -259,11 +303,20 @@ impl Linter {
             };
             let region = &source[segment.to_range()];
             for rule in &scope.rules {
-                let callback = self.callbacks.get(&rule.id).map(|a| a.as_ref());
-                collect_rule(rule, callback, info, source, region, segment.start, out);
+                let matchers = Matchers {
+                    callback: self.callbacks.get(&rule.id).map(|a| a.as_ref()),
+                    parser: self.parsers.get(&rule.id).map(|a| a.as_ref()),
+                };
+                collect_rule(rule, matchers, info, source, region, segment.start, out);
             }
         }
     }
+}
+
+/// A rule's resolved implementations for one lint run.
+struct Matchers<'a> {
+    callback: Option<&'a dyn MatchCallback>,
+    parser: Option<&'a dyn MatchParser>,
 }
 
 impl fmt::Debug for Linter {
@@ -272,59 +325,89 @@ impl fmt::Debug for Linter {
             .field("rules", &self.rules.len())
             .field("scopes", &self.scopes.len())
             .field("callbacks", &self.callbacks.len())
+            .field("parsers", &self.parsers.len())
             .finish()
     }
 }
 
 fn collect_rule(
     rule: &Rule,
-    callback: Option<&dyn MatchCallback>,
+    matchers: Matchers<'_>,
     info: DocInfo<'_>,
     source: &str,
     text: &str,
     offset: usize,
     out: &mut Vec<Violation>,
 ) {
-    for caps in rule.regex.captures_iter(text) {
-        let whole = match caps.get(0) {
-            Some(m) if !m.is_empty() => m,
-            _ => continue,
-        };
-        let (severity, message) = match callback {
-            None => (
-                rule.severity,
-                rule.message
-                    .as_ref()
-                    .map_or_else(String::new, |t| t.render(&caps)),
-            ),
+    // Find phase: every matcher produces the same relative-match shape.
+    let found: Vec<RawMatch> = match (&rule.matcher, matchers.parser) {
+        (Matcher::Regex(regex), _) => regex
+            .captures_iter(text)
+            .filter_map(|caps| {
+                let whole = caps.get(0)?;
+                if whole.is_empty() {
+                    return None;
+                }
+                let mut raw = RawMatch::new(whole.start(), whole.end());
+                let group_names: Vec<Option<&str>> = rule.capture_names();
+                for (i, group) in caps.iter().enumerate().skip(1) {
+                    let Some(group) = group else { continue };
+                    let name = group_names
+                        .get(i)
+                        .cloned()
+                        .flatten()
+                        .map_or_else(|| i.to_string(), str::to_string);
+                    raw = raw.with_capture(name, group.as_str());
+                }
+                Some(raw)
+            })
+            .collect(),
+        (Matcher::Parser, Some(parser)) => match parser.find(text, offset) {
+            Ok(found) => found,
+            Err(e) => {
+                out.push(Violation {
+                    rule_id: rule.id.clone(),
+                    severity: Severity::Error,
+                    span: Span::new(offset, offset),
+                    message: format!("rule '{}': parser error: {e}", rule.id),
+                });
+                return;
+            }
+        },
+        (Matcher::Parser, None) => {
+            unreachable!("parser rules always resolve to a registered parser")
+        }
+    };
+
+    // Decide phase: one shared path for both matchers.
+    for raw in found {
+        if raw.start >= raw.finish {
+            continue; // zero-width matches are noise
+        }
+        let start = offset + raw.start;
+        let finish = offset + raw.finish;
+        let (severity, message) = match matchers.callback {
+            None => {
+                let match_text = source.get(start..finish).unwrap_or_default();
+                (
+                    rule.severity,
+                    rule.message
+                        .as_ref()
+                        .map_or_else(String::new, |t| t.render_with(match_text, &raw.captures)),
+                )
+            }
             Some(callback) => {
-                let start = offset + whole.start();
                 let (line, col) = crate::line_col(source, start);
-                let group_names: Vec<Option<&str>> = rule.regex.capture_names().collect();
-                let captures: Vec<(String, String)> = caps
-                    .iter()
-                    .enumerate()
-                    .skip(1)
-                    .filter_map(|(i, group)| {
-                        let group = group?;
-                        let name = group_names
-                            .get(i)
-                            .cloned()
-                            .flatten()
-                            .map_or_else(|| i.to_string(), str::to_string);
-                        Some((name, group.as_str().to_string()))
-                    })
-                    .collect();
                 let ctx = MatchContext {
                     path: info.path.to_string(),
                     language: info.language.to_string(),
                     rule_id: rule.id.clone(),
                     start,
-                    finish: offset + whole.end(),
+                    finish,
                     line,
                     col,
-                    match_text: whole.as_str().to_string(),
-                    captures,
+                    match_text: source.get(start..finish).unwrap_or_default().to_string(),
+                    captures: raw.captures.clone(),
                 };
                 match callback.evaluate(&ctx) {
                     Err(e) => (
@@ -336,7 +419,7 @@ fn collect_rule(
                         (severity.unwrap_or(rule.severity), message)
                     }
                     Ok(Decision::ViolateDefault) => match rule.message.as_ref() {
-                        Some(template) => (rule.severity, template.render(&caps)),
+                        Some(template) => (rule.severity, template.render_with(&ctx.match_text, &raw.captures)),
                         None => (
                             Severity::Error,
                             format!(
@@ -351,7 +434,7 @@ fn collect_rule(
         out.push(Violation {
             rule_id: rule.id.clone(),
             severity,
-            span: Span::new(offset + whole.start(), offset + whole.end()),
+            span: Span::new(start, finish),
             message,
         });
     }
