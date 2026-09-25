@@ -187,7 +187,7 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
 name = "declint"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "clap",
  "declint-core",
@@ -199,7 +199,7 @@ dependencies = [
 
 [[package]]
 name = "declint-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "regex",
  "serde_yaml",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "declint-lsp"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "declint-core",
  "declint-lua",
@@ -218,7 +218,7 @@ dependencies = [
 
 [[package]]
 name = "declint-lua"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "declint-core",
  "mlua",

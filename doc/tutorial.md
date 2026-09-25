@@ -379,6 +379,9 @@ them — only one language's configs ever apply to a given document, so
 
 ## Where to go from here
 
+* **Shortcuts:** `declint init --lang ini` scaffolds this exact config
+  via `import: [preset:ini]`, and `declint presets` lists the embedded
+  library — see ["Imports & presets"](../README.md#imports--presets).
 * **Level 2:** [`python-tutorial.md`](python-tutorial.md) repeats the
   arc on a real language — a mini-flake8 with function scopes, the
   no-lookaround workarounds, and the mutable-default-arguments

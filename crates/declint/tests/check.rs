@@ -248,3 +248,74 @@ fn explicit_missing_file_still_fails_hard() {
     assert!(stderr.contains("cannot read"), "{stderr}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn presets_command_lists_and_shows() {
+    let dir = std::env::temp_dir().join(format!("ezlint-ps-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["presets"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(stdout.contains("python"), "{stdout}");
+    assert!(stdout.contains("ini"), "{stdout}");
+    assert!(stdout.contains("markdown"), "{stdout}");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["presets", "ini"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(stdout.contains("empty-value"), "{stdout}");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["presets", "nope"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn init_scaffolds_and_refuses_overwrite() {
+    let dir = std::env::temp_dir().join(format!("ezlint-init-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["init", "--lang", "python"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let config = std::fs::read_to_string(dir.join(".declint.yaml")).unwrap();
+    assert!(config.contains("languages: [python]"), "{config}");
+    assert!(config.contains("preset:python"), "{config}");
+
+    // The scaffold lints: a violating file is flagged through the import.
+    std::fs::write(dir.join("x.py"), "\tsoft tab\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["check", "x.py"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+
+    // Second init refuses to clobber.
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["init", "--lang", "ini"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let config = std::fs::read_to_string(dir.join(".declint.yaml")).unwrap();
+    assert!(config.contains("preset:python"), "unchanged: {config}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

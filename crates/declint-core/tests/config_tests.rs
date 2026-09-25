@@ -44,7 +44,7 @@ fn version_is_required_and_pinned() {
 fn rules_or_scopes_are_required() {
     assert_eq!(
         err("version: 1"),
-        "config must define `rules` or `scopes`"
+        "config must define `rules` or `scopes` (directly or via imports)"
     );
     assert!(err("version: 1\nrules: nope").contains("`rules` must be a list"));
     assert!(err("version: 1\nscopes: nope").contains("`scopes` must be a list"));

@@ -59,6 +59,18 @@ enum Command {
         #[arg(required = true)]
         files: Vec<PathBuf>,
     },
+    /// List the embedded preset library, or show one preset's YAML.
+    Presets {
+        /// Show this preset's full YAML instead of listing all presets.
+        name: Option<String>,
+    },
+    /// Scaffold a starter `.declint.yaml` in the current directory.
+    Init {
+        /// Start from a preset (`python`, `ini`, `markdown`): the config
+        /// imports it and pins the language.
+        #[arg(long)]
+        lang: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -227,6 +239,72 @@ fn print_github(path: &std::path::Path, source: &str, violations: &[Violation]) 
     }
 }
 
+fn presets(name: Option<&String>) -> ExitCode {
+    match name {
+        None => {
+            for preset in declint_core::presets::PRESETS {
+                println!("{}  —  {}", preset.name, preset.description);
+            }
+            println!();
+            println!("show one:   declint presets <name>");
+            println!("import one: `import: [preset:<name>]` in your .declint.yaml");
+            ExitCode::SUCCESS
+        }
+        Some(name) => match declint_core::presets::lookup(name) {
+            Some(preset) => {
+                print!("{}", preset.content);
+                ExitCode::SUCCESS
+            }
+            None => {
+                eprintln!(
+                    "declint: unknown preset `{name}` (available: {})",
+                    declint_core::presets::names()
+                );
+                ExitCode::from(2)
+            }
+        },
+    }
+}
+
+const STARTER_CONFIG: &str = "\
+version: 1
+rules:
+  # Your first rule. Patterns are single-quoted YAML, and `(?m)` makes
+  # ^ and $ anchor to lines.
+  - id: no-tabs
+    pattern: '(?m)^\\t+'
+    message: \"Tab character — use spaces\"
+    severity: warning
+
+  # Curated starters are one import away:
+  #   declint presets                       # list them
+  #   import: [preset:python]               # at the top of this file
+";
+
+fn init(lang: Option<&String>) -> ExitCode {
+    let target = std::path::Path::new(".declint.yaml");
+    if target.exists() {
+        eprintln!("declint: refusing to overwrite existing .declint.yaml");
+        return ExitCode::from(2);
+    }
+    let content = match lang {
+        None => STARTER_CONFIG.to_string(),
+        Some(lang) => {
+            if declint_core::presets::lookup(lang).is_none() {
+                eprintln!(
+                    "declint: unknown preset `{lang}` (available: {})",
+                    declint_core::presets::names()
+                );
+                return ExitCode::from(2);
+            }
+            format!("version: 1\nlanguages: [{lang}]\nimport:\n  - preset:{lang}\n")
+        }
+    };
+    std::fs::write(target, content).unwrap();
+    println!("wrote .declint.yaml — try `declint check .`");
+    ExitCode::SUCCESS
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
@@ -247,5 +325,7 @@ fn main() -> ExitCode {
             format,
             files,
         } => check(config.as_ref(), language.as_ref(), format, &files),
+        Command::Presets { name } => presets(name.as_ref()),
+        Command::Init { lang } => init(lang.as_ref()),
     }
 }

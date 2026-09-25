@@ -299,6 +299,9 @@ are parsers, not patterns, and that's the border of this tool.
 
 ## Where to go from here
 
+* **Shortcuts:** `declint init --lang python` scaffolds this ruleset
+  via `import: [preset:python]` — the preset also carries an
+  `async def`-aware function scope.
 * The **README** has the full reference — config schema, scope
   semantics, the callback contract, parser rules, discovery order.
 * [`examples/python/`](../examples/python) is this guide's finished

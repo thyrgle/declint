@@ -1,6 +1,6 @@
 [package]
 name = "declint"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 description = "A YAML-configured regex linter and language server: `declint serve` in your editor, `declint check` in CI."
 license = "MIT OR Apache-2.0"
@@ -11,9 +11,9 @@ categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-declint-core = { path = "../declint-core", version = "0.6.0" }
-declint-lsp = { path = "../declint-lsp", version = "0.6.0" }
-declint-lua = { path = "../declint-lua", version = "0.6.0" }
+declint-core = { path = "../declint-core", version = "0.7.0" }
+declint-lsp = { path = "../declint-lsp", version = "0.7.0" }
+declint-lua = { path = "../declint-lua", version = "0.7.0" }
 ignore = "0.4"
 
 [dev-dependencies]

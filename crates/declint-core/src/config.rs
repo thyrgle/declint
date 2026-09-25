@@ -1,13 +1,14 @@
 //! Rule-file loading: schema validation with rule ids and file lines in
 //! every error.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::Path;
 
 use serde_yaml::Value;
 
 use crate::callback::CallbackRef;
+use crate::presets;
 use crate::template::Template;
 use crate::Severity;
 
@@ -19,6 +20,42 @@ pub(crate) enum Matcher {
     Regex(regex::Regex),
     /// `parser:` — resolved against the registry at linter build time.
     Parser,
+}
+
+/// One resolved `import:` entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ImportSource {
+    /// `preset:<name>` — an embedded library config.
+    Preset(String),
+    /// A path ending in `.yaml`/`.yml`, relative to the importing file.
+    File(String),
+}
+
+impl ImportSource {
+    /// The entry as written in the config, for error messages.
+    fn as_written(&self) -> String {
+        match self {
+            Self::Preset(name) => format!("preset:{name}"),
+            Self::File(path) => path.clone(),
+        }
+    }
+}
+
+/// Classifies an `import:` entry.
+pub(crate) fn classify_import(entry: &str) -> Result<ImportSource, String> {
+    if let Some(name) = entry.strip_prefix("preset:") {
+        if name.is_empty() {
+            return Err("preset imports need a name (`preset:python`)".into());
+        }
+        Ok(ImportSource::Preset(name.to_string()))
+    } else if entry.ends_with(".yaml") || entry.ends_with(".yml") {
+        Ok(ImportSource::File(entry.to_string()))
+    } else {
+        Err(
+            "import entries must be `preset:<name>` or a path ending in `.yaml`/`.yml`"
+                .into(),
+        )
+    }
 }
 
 /// The config schema version this declint understands.
@@ -71,6 +108,15 @@ impl ConfigError {
         self
     }
 
+    /// Annotates an error with the import entry it occurred behind.
+    fn at_import(mut self, entry: &str, parent_origin: &str) -> Self {
+        self.message = format!("import '{entry}': {}", self.message);
+        if self.path.is_none() {
+            self.path = Some(parent_origin.to_string());
+        }
+        self
+    }
+
     /// The problem's 1-based line in the config file, when known.
     pub fn line(&self) -> Option<usize> {
         self.line
@@ -113,9 +159,14 @@ pub struct Config {
     /// against the client's `languageId`; in Neovim, the filetype).
     /// Empty = every language.
     pub languages: Vec<String>,
-    /// The validated global rules, in file order.
+    /// The raw `import:` entries, as written.
+    pub imports: Vec<String>,
+    /// The classified `import:` entries (drained during resolution).
+    import_entries: Vec<ImportSource>,
+    /// The validated global rules, in file order (imported rules
+    /// first).
     pub rules: Vec<Rule>,
-    /// The validated scopes, in file order.
+    /// The validated scopes, in file order (imported scopes first).
     pub scopes: Vec<Scope>,
 }
 
@@ -176,8 +227,53 @@ pub struct Scope {
 
 impl Config {
     /// Loads and validates a config from YAML text.
+    ///
+    /// `preset:` imports resolve against the embedded library; relative
+    /// file imports need a file — use [`Config::load`] for those.
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(yaml: &str) -> Result<Self, ConfigError> {
+        Self::resolve(yaml, None, "<config>", "<config>", &mut Vec::new())
+    }
+
+    /// Loads and validates the config site at `path` (a file), resolving
+    /// its `import:` entries recursively.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
+        let path = path.as_ref();
+        let shown = path.display().to_string();
+        let yaml = std::fs::read_to_string(path).map_err(|e| {
+            ConfigError::new(format!("cannot read config file: {e}")).with_path(&shown)
+        })?;
+        let canonical = path
+            .canonicalize()
+            .unwrap_or_else(|_| path.to_path_buf());
+        let mut stack = Vec::new();
+        let base = path.parent().map(Path::to_path_buf);
+        Self::resolve(
+            &yaml,
+            base.as_deref(),
+            &shown,
+            &canonical.display().to_string(),
+            &mut stack,
+        )
+        .map_err(|e| e.with_path(shown))
+    }
+
+    /// Parses `yaml` (origin: a display label for error messages) and
+    /// resolves its imports depth-first. `stack` holds the markers of
+    /// every ancestor — canonical file paths and `preset:<name>` — for
+    /// cycle detection.
+    fn resolve(
+        yaml: &str,
+        base: Option<&std::path::Path>,
+        origin: &str,
+        marker: &str,
+        stack: &mut Vec<String>,
+    ) -> Result<Self, ConfigError> {
+        if stack.iter().any(|m| m == marker) {
+            return Err(ConfigError::new(format!(
+                "import cycle detected ({origin} imports itself, directly or indirectly)"
+            )));
+        }
         let value: Value = serde_yaml::from_str(yaml).map_err(|e| {
             let err = ConfigError::new(e.to_string());
             match e.location() {
@@ -185,17 +281,152 @@ impl Config {
                 None => err,
             }
         })?;
-        Self::from_value(value, yaml)
+        let mut config = Self::from_value(value, yaml)?;
+        stack.push(marker.to_string());
+
+        let mut rules: Vec<(Rule, String)> = Vec::new();
+        let mut scopes: Vec<(Scope, String)> = Vec::new();
+        for entry in std::mem::take(&mut config.import_entries) {
+            let entry_text = entry.as_written();
+            let entry_text = &entry_text;
+            match &entry {
+                ImportSource::Preset(name) => {
+                    let Some(preset) = presets::lookup(name) else {
+                        return Err(ConfigError::new(format!(
+                            "unknown preset `{name}` (available: {})",
+                            presets::names()
+                        ))
+                        .at_import(entry_text, origin));
+                    };
+                    let child_origin = format!("preset:{name}");
+                    let child =
+                        Self::resolve(preset.content, None, &child_origin, &child_origin, stack)
+                            .map_err(|e| in_import(entry_text, e))?;
+                    Self::absorb(
+                        &child,
+                        &child_origin,
+                        entry_text,
+                        origin,
+                        &mut rules,
+                        &mut scopes,
+                    )?;
+                }
+                ImportSource::File(relative) => {
+                    let Some(base) = base else {
+                        return Err(ConfigError::new(
+                            "relative import requires loading the config from a file \
+                             (use Config::load)",
+                        )
+                        .at_import(entry_text, origin));
+                    };
+                    let path = base.join(relative);
+                    let child_yaml = std::fs::read_to_string(&path).map_err(|e| {
+                        ConfigError::new(format!(
+                            "cannot read imported config `{relative}`: {e}"
+                        ))
+                        .at_import(entry_text, origin)
+                    })?;
+                    let canonical = path.canonicalize().map_err(|e| {
+                        ConfigError::new(format!(
+                            "cannot resolve imported config `{relative}`: {e}"
+                        ))
+                        .at_import(entry_text, origin)
+                    })?;
+                    let child_origin = path.display().to_string();
+                    let child = Self::resolve(
+                        &child_yaml,
+                        Some(path.parent().unwrap_or(Path::new("."))),
+                        &child_origin,
+                        &canonical.display().to_string(),
+                        stack,
+                    )
+                    .map_err(|e| in_import(entry_text, e))?;
+                    Self::absorb(
+                        &child,
+                        &child_origin,
+                        entry_text,
+                        origin,
+                        &mut rules,
+                        &mut scopes,
+                    )?;
+                }
+            }
+        }
+        for rule in std::mem::take(&mut config.rules) {
+            rules.push((rule, origin.to_string()));
+        }
+        for scope in std::mem::take(&mut config.scopes) {
+            scopes.push((scope, origin.to_string()));
+        }
+
+        // One id namespace across everything, imported and own.
+        let mut seen: HashMap<&str, &str> = HashMap::new();
+        for (rule, rule_origin) in &rules {
+            if let Some(first) = seen.get(rule.id.as_str()) {
+                return Err(ConfigError::new(format!(
+                    "duplicate rule id `{}` (defined in {first} and {rule_origin})",
+                    rule.id
+                )));
+            }
+            seen.insert(rule.id.as_str(), rule_origin);
+        }
+        for (scope, scope_origin) in &scopes {
+            if let Some(first) = seen.get(scope.id.as_str()) {
+                return Err(ConfigError::new(format!(
+                    "duplicate scope id `{}` (defined in {first} and {scope_origin})",
+                    scope.id
+                )));
+            }
+            seen.insert(scope.id.as_str(), scope_origin);
+        }
+
+        // The presence check happens after imports merge: a config that
+        // only imports (no own rules/scopes) is legitimate.
+        if rules.is_empty() && scopes.is_empty() {
+            return Err(ConfigError::new(
+                "config must define `rules` or `scopes` (directly or via imports)",
+            ));
+        }
+
+        stack.pop();
+        config.rules = rules.into_iter().map(|(rule, _)| rule).collect();
+        config.scopes = scopes.into_iter().map(|(scope, _)| scope).collect();
+        Ok(config)
     }
 
-    /// Loads and validates the config file at `path`.
-    pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
-        let path = path.as_ref();
-        let shown = path.display().to_string();
-        let yaml = std::fs::read_to_string(path).map_err(|e| {
-            ConfigError::new(format!("cannot read config file: {e}")).with_path(&shown)
-        })?;
-        Self::from_str(&yaml).map_err(|e| e.with_path(shown))
+    /// Merges one imported fragment: appended first-in (before the
+    /// importer's own items), with its language policy checked.
+    fn absorb(
+        child: &Config,
+        child_origin: &str,
+        entry: &str,
+        parent_origin: &str,
+        rules: &mut Vec<(Rule, String)>,
+        scopes: &mut Vec<(Scope, String)>,
+    ) -> Result<(), ConfigError> {
+        if !child.languages.is_empty() {
+            return Err(ConfigError::new(format!(
+                "imported config declares `languages` ({}) — language policy belongs to \
+                 the importing config",
+                child.languages.join(", ")
+            ))
+            .at_import(entry, parent_origin));
+        }
+        rules.extend(
+            child
+                .rules
+                .iter()
+                .cloned()
+                .map(|rule| (rule, child_origin.to_string())),
+        );
+        scopes.extend(
+            child
+                .scopes
+                .iter()
+                .cloned()
+                .map(|scope| (scope, child_origin.to_string())),
+        );
+        Ok(())
     }
 
     fn from_value(value: Value, yaml: &str) -> Result<Self, ConfigError> {
@@ -223,9 +454,6 @@ impl Config {
 
         let rules_value = map.get(Value::from("rules"));
         let scopes_value = map.get(Value::from("scopes"));
-        if rules_value.is_none() && scopes_value.is_none() {
-            return Err(ConfigError::new("config must define `rules` or `scopes`"));
-        }
 
         let languages = match map.get(Value::from("languages")) {
             None => Vec::new(),
@@ -293,9 +521,42 @@ impl Config {
             }
         };
 
+        let import_entries = match map.get(Value::from("import")) {
+            None => Vec::new(),
+            Some(value) => {
+                let Value::Sequence(entries) = value else {
+                    return Err(ConfigError::new(
+                        "`import` must be a list of entries (`preset:<name>` or a \
+                         `.yaml`/`.yml` path)",
+                    ));
+                };
+                let mut classified = Vec::new();
+                for entry in entries {
+                    let Some(text) = entry.as_str().filter(|s| !s.is_empty()) else {
+                        return Err(ConfigError::new(
+                            "`import` entries must be non-empty strings",
+                        ));
+                    };
+                    match classify_import(text) {
+                        Ok(source) => classified.push(source),
+                        Err(message) => return Err(ConfigError::new(message)),
+                    }
+                }
+                classified
+            }
+        };
+
         Ok(Self {
             version,
             languages,
+            imports: import_entries
+                .iter()
+                .map(|source| match source {
+                    ImportSource::Preset(name) => format!("preset:{name}"),
+                    ImportSource::File(path) => path.clone(),
+                })
+                .collect(),
+            import_entries,
             rules,
             scopes,
         })
@@ -624,6 +885,17 @@ fn block_seq_item_lines<'a>(
         }
     }
     items
+}
+
+/// Annotates a child config's error with the import entry that pulled it
+/// in — the message chains through every import level.
+fn in_import(entry: &str, err: ConfigError) -> ConfigError {
+    ConfigError {
+        message: format!("in import '{entry}': {}", err.message),
+        line: err.line,
+        column: err.column,
+        path: err.path,
+    }
 }
 
 #[cfg(test)]

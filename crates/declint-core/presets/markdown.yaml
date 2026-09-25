@@ -1,0 +1,24 @@
+# declint preset: Markdown
+#
+# Import it:
+#
+#   import:
+#     - preset:markdown
+
+version: 1
+
+rules:
+  - id: no-tabs
+    pattern: '(?m)^\t+'
+    message: "Tab character — use spaces"
+    severity: warning
+
+  - id: trailing-whitespace
+    pattern: '(?m)[ \t]+\r?$'
+    message: "Trailing whitespace"
+    severity: hint
+
+  - id: bare-url
+    pattern: '(?m)https?://\S+$'
+    message: "bare URL — wrap it in angle brackets"
+    severity: hint

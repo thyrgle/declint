@@ -62,6 +62,9 @@
 
 mod callback;
 mod config;
+/// The embedded preset library: curated config fragments importable as
+/// `import: preset:<name>`.
+pub mod presets;
 mod config_set;
 mod lang;
 mod linter;

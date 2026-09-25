@@ -83,6 +83,9 @@ explicit path too).
 
 ```yaml
 version: 1                # required; this declint understands version 1
+import:                   # optional; merge other configs' rules+scopes in
+  - preset:python         #   embedded presets (see "Imports & presets")
+  - ./team-scopes.yaml    #   or any relative YAML file
 languages: [markdown, sh] # optional; editor language ids this config applies
                           # to (exact match; missing = all languages)
 rules:                    # file-global rules; optional if `scopes` is present
@@ -263,6 +266,37 @@ config.
    names (`md` → `markdown`, `py` → `python`, `sh` → `sh`, ...)
 3. Unknown → only configs **without** a `languages` key apply
 
+## Imports & presets
+
+Configs can pull in other configs — and declint ships a small library of
+curated presets, embedded in the binary:
+
+```yaml
+version: 1
+languages: [python]        # language policy belongs to THIS config
+import:
+  - preset:python          # embedded preset (declint presets — list them)
+  - ./team-scopes.yaml     # any relative YAML config
+rules:
+  # your own rules, merged after the imports
+```
+
+* Imported `rules:`/`scopes:` concatenate before the importer's own;
+  all ids share one namespace, and duplicates across imports are a
+  config error naming both sources.
+* Imported configs must not declare `languages` — only the top-level
+  config does.
+* Relative paths resolve against the importing file; imports may nest,
+  with cycle detection.
+* `declint presets` lists the library; `declint presets python` prints
+  the YAML; `declint init --lang python` scaffolds a config that
+  imports it.
+
+Shipped presets: `python` (PEP 8 warm-ups, mutable defaults, top-level
+function scopes), `ini` (tabs, trailing whitespace, empty values, a
+`[server]` scope example), `markdown` (tabs, trailing whitespace, bare
+URLs).
+
 ## Continuous integration
 
 `declint check` is CI-shaped: `file:line:col: severity[id]: message`
@@ -291,7 +325,7 @@ jobs:
       - uses: thyrgle/declint@v0        # the composite action in this repo
         with:
           path: .
-          declint-version: "0.6.0"
+          declint-version: "0.7.0"
 ```
 
 **Or by hand**, without the action:
@@ -350,7 +384,7 @@ filter, style, and (later) suppress per rule.
 
 ## Status
 
-0.5.0 — Lua parser rules (whole-file matchers for duplicates, absence
+0.7.0 — imports & presets (preset:python/ini/markdown, declint init, declint presets), Lua parser rules (whole-file matchers for duplicates, absence
 rules, and custom matching), Lua match callbacks, hidden configs with
 directory discovery, per-language configs, scoped rules; the schema is
 versioned to keep future configs compatible.

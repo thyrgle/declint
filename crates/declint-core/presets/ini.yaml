@@ -1,0 +1,51 @@
+# declint preset: INI
+#
+# A curated starter ruleset — the rules from doc/tutorial.md. Import it:
+#
+#   import:
+#     - preset:ini
+#
+# Presets never declare `languages` — set that in your own config:
+#
+#   languages: [ini]
+
+version: 1
+
+rules:
+  - id: no-tabs
+    pattern: '(?m)^\t+'
+    message: "Tab character — use spaces"
+    severity: warning
+
+  # CRLF-tolerant: the optional \r keeps this working on Windows files.
+  - id: trailing-whitespace
+    pattern: '(?m)[ \t]+\r?$'
+    message: "Trailing whitespace"
+    severity: hint
+
+  - id: empty-value
+    pattern: '(?m)^\s*(?<key>[\w-]+)[ \t]*=[ \t]*$'
+    message: "'{key}' has no value"
+    severity: warning
+
+scopes:
+  # Example scope: rules for [server] sections. Copy this scope, rename
+  # it, and adjust `start` to target any section by name.
+  - id: server
+    start: '^\[server\]$'
+    end: '^\['
+    rules:
+      - id: port-range
+        pattern: '(?m)^\s*port[ \t]*=[ \t]*(?<port>\S+)'
+        severity: error
+        callback: |
+          return function(c)
+            local n = tonumber(c.captures.port)
+            if n == nil then
+              return { message = "port must be a number, found '" .. c.captures.port .. "'" }
+            end
+            if n < 1 or n > 65535 then
+              return { message = "port must be 1-65535, found " .. n }
+            end
+            return nil
+          end

@@ -78,7 +78,7 @@ fn discovery_walks_up_and_prefers_hidden() {
     write(&root.join(CONFIG_FILE), RULES);
     write(
         &root.join("declint.yaml"),
-        "version: 1\nscopes: []\nrules: []\n",
+        "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n",
     );
     // ...and a subdir with no config of its own finds the parent's.
     let sub = root.join("a").join("b");
@@ -96,11 +96,11 @@ fn legacy_file_beats_parent_directory_configs() {
     let sub = root.join("legacy-dir");
     write(
         &sub.join("declint.yaml"),
-        "version: 1\nscopes: []\nrules: []\n",
+        "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n",
     );
     // The nearer legacy file is the config site for its directory.
     let set = ConfigSet::discover(&sub).unwrap();
-    assert_eq!(set.configs()[0].config.rules.len(), 0);
+    assert_eq!(set.configs()[0].config.rules.len(), 1);
     std::fs::remove_dir_all(&root).unwrap();
 }
 

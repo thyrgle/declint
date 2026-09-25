@@ -20,7 +20,7 @@ inputs:
   declint-version:
     description: "declint version to install from crates.io"
     required: false
-    default: "0.6.0"
+    default: "0.7.0"
 
 runs:
   using: "composite"

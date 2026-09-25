@@ -669,3 +669,66 @@ rules:
         assert_eq!(v[0].message, "parser found 7 things");
     }
 }
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+    use declint_core::{DocInfo, Linter};
+
+    #[test]
+    fn callback_inside_an_imported_file_fires() {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("declint-lua-{}-{n}-imp", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("lib.yaml"),
+            "version: 1\nrules:\n  - id: loud\n    pattern: 'TODO(!+)'\n    message: 'bangs: {match}'\n    callback: |\n      return function(c) return { message = c.captures[\"1\"] } end\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(".declint.yaml"),
+            "version: 1\nimport:\n  - lib.yaml\n",
+        )
+        .unwrap();
+        let set = ConfigSet::discover(&dir).unwrap();
+        let mut callbacks = Callbacks::new();
+        attach(&set, &mut callbacks).unwrap();
+        let linter = Linter::new(set.configs()[0].config.clone(), &callbacks).unwrap();
+        let v = linter.lint_in(
+            DocInfo { path: "a.md", language: "markdown" },
+            "TODO!!",
+        );
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].message, "!!");
+    }
+
+    #[test]
+    fn imported_python_preset_scope_handles_async_defs() {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("declint-lua-{}-{n}-async", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(".declint.yaml"),
+            "version: 1\nlanguages: [python]\nimport:\n  - preset:python\n",
+        )
+        .unwrap();
+        let set = ConfigSet::discover(&dir).unwrap();
+        let mut callbacks = Callbacks::new();
+        attach(&set, &mut callbacks).unwrap();
+        let linter = Linter::new(set.configs()[0].config.clone(), &callbacks).unwrap();
+
+        let source = "async def go():\n    print(1)\n\nprint(2)\n";
+        let v = linter.lint_all_in(
+            DocInfo { path: "app.py", language: "python" },
+            source,
+        );
+        // The print inside `async def go` is flagged; the top-level one is not.
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].rule_id, "print-in-function");
+        assert_eq!(v[0].span.to_range(), 20..26);
+    }
+}
