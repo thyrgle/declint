@@ -3,7 +3,8 @@
 A YAML-configured regex linter and language server, built on
 [increparse](../increparse). Describe lint rules in a small YAML file and get
 both an **LSP server** (`declint serve`, diagnostics in your editor as you
-type) and a **CLI** (`declint check`, for CI) — no Rust required.
+type) and a **CLI** (`declint check`, for CI) — no Rust required. The
+internal layout is summarized in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ```yaml
 version: 1

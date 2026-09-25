@@ -13,6 +13,13 @@ part 8 maps it precisely. Inside that ceiling there is still a
 surprisingly useful subset of what flake8 and pycodestyle do, and
 building it teaches every feature declint has.
 
+> **The fast path.** If you just want working rules and not the tour,
+> `declint init --lang python` scaffolds a config that imports
+> `preset:python` — the finished ruleset from this guide, curated. This
+> tutorial rebuilds that preset piece by piece so you can customize it;
+> the thirty minutes pay for themselves the first time you need a rule
+> nobody ships.
+
 The sample is a small `app.py` — deliberately valid Python (run
 `python3 -c "compile(open('app.py').read(), 'app.py', 'exec')"` to
 check), but seeded with one instance of every crime:
@@ -277,6 +284,55 @@ house-style extras those tools will never know about — your
 suppression marker, your print policy, your naming rules — in a file
 that took twenty minutes to write and runs in the same process as your
 editor.
+
+## Using (and customizing) the preset
+
+Everything this guide built — plus a little curation — ships as
+`preset:python`, embedded in the binary. A config that uses it is four
+lines:
+
+```yaml
+# .declint.yaml
+version: 1
+languages: [python]
+import:
+  - preset:python
+```
+
+The preset is a curated superset of the tutorial's ruleset: the
+function scope handles `async def`, the warm-up rules are
+battle-tested, and the mutable-default callback ships ready-made. Show
+it any time with `declint presets python` — it is ordinary YAML, and
+`declint init --lang python` writes the four-line config for you.
+
+**Customizing** follows from ids being unique: to change how a preset
+rule behaves, copy it out of the preset into your own `rules:` list and
+edit the copy — then it can't be imported again, so also drop the
+`import:` entry if you've forked every rule you care about:
+
+```yaml
+version: 1
+languages: [python]
+rules:
+  # forked from preset:python — our house severity, our message
+  - id: mutable-default
+    pattern: '(?m)^\s*def\s+(?<function>\w+)\s*\([^)]*=[ \t]*(?<default>\[\]|\{\})(?<rest>[^\n]*)'
+    severity: warning          # the preset uses error; we are softer
+    callback: |
+      return function(c)
+        if c.captures.rest:find("declint:allow") then return nil end
+        return { message = "'" .. c.captures["function"] .. "' shares its " ..
+                 c.captures["default"] .. " across calls" }
+      end
+```
+
+Two rules of the road:
+
+* Keep the `import:` for everything you *don't* fork — preset upgrades
+  flow to every rule you didn't copy.
+* If you see `duplicate rule id 'mutable-default' (defined in
+  preset:python and …)` in an error, you have the rule in both places:
+  remove one.
 
 ## 7. The ceiling, precisely
 
