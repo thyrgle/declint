@@ -1,0 +1,16 @@
+[package]
+name = "ezlint"
+version = "0.1.0"
+edition = "2021"
+description = "A YAML-configured regex linter and language server: `ezlint serve` in your editor, `ezlint check` in CI."
+license = "MIT OR Apache-2.0"
+keywords = ["lint", "linter", "cli", "lsp"]
+categories = ["development-tools", "command-line-utilities"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+ezlint-core = { path = "../ezlint-core", version = "0.1.0" }
+ezlint-lsp = { path = "../ezlint-lsp", version = "0.1.0" }
+
+[dev-dependencies]
+serde_json = "1"

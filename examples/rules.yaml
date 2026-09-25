@@ -1,0 +1,37 @@
+# An example ezlint rule set — language-agnostic cleanliness checks.
+#
+# Copy it next to your files as `ezlint.yaml`, then:
+#   ezlint serve ezlint.yaml          # in your editor (LSP over stdio)
+#   ezlint check --config ezlint.yaml src/**   # in CI
+
+version: 1
+rules:
+  - id: no-tabs
+    pattern: '\t+'
+    message: "Tab character — use spaces"
+    severity: warning
+
+  - id: trailing-whitespace
+    pattern: '[ \t]+$'
+    message: "Trailing whitespace"
+    severity: hint
+
+  - id: todo-comment
+    pattern: '\bTODO\b'
+    message: "Unresolved TODO: '{match}'"
+    severity: info
+
+  - id: fixme-comment
+    pattern: '\bFIXME\b'
+    message: "Unresolved FIXME: '{match}'"
+    severity: warning
+
+  - id: double-punctuation
+    pattern: '[!?]{2,}'
+    message: "Calm down: '{match}'"
+    severity: hint
+
+  - id: user-left-in-message
+    pattern: 'password\s*=\s*[''"]?(?<secret>\w+)'
+    message: "Possible hardcoded password: '{secret}'"
+    severity: error
