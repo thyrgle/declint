@@ -13,6 +13,11 @@ order. This document is the runbook.
 
 ## Per release
 
+0. **Prerequisite:** the `increparse` workspace (the sibling directory)
+   must already be published — `declint-lsp` depends on `increparse`
+   and `increparse-lsp` from crates.io. If versions changed there,
+   update the requirements in `crates/declint-lsp/Cargo.toml` first.
+   See `../increparse/PUBLISHING.md`.
 1. Bump versions everywhere (`crates/*/Cargo.toml` — the four crates
    share a version) and update intra-workspace version requirements.
 2. `cargo test --workspace && cargo clippy --workspace --all-targets`
