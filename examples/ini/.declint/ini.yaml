@@ -1,0 +1,48 @@
+# INI rules — everything from doc/tutorial.md parts 2-5.
+
+version: 1
+languages: [ini]
+rules:
+  - id: no-tabs
+    pattern: '\t+'
+    message: "Tab character — use spaces"
+    severity: warning
+
+  - id: empty-value
+    pattern: '(?m)^\s*(?<key>[\w-]+)[ \t]*=[ \t]*$'
+    message: "'{key}' has no value"
+    severity: warning
+
+  - id: kebab-case-keys
+    pattern: '(?m)^\s*(?<key>[\w-]+)[ \t]*='
+    severity: warning
+    callback: |
+      return function(c)
+        local key = c.captures.key
+        if key == key:lower() then return nil end
+        if key == "mySQL" then return nil end
+        return { message = "key '" .. key .. "' should be kebab-case" }
+      end
+
+scopes:
+  # Rules for [server] sections: the port must parse as a number in
+  # 1-65535. The region spans from the [server] header to the next
+  # section header (or end of file).
+  - id: server
+    start: '^\[server\]$'
+    end: '^\['
+    rules:
+      - id: port-range
+        pattern: '(?m)^\s*port[ \t]*=[ \t]*(?<port>\S+)'
+        severity: error
+        callback: |
+          return function(c)
+            local n = tonumber(c.captures.port)
+            if n == nil then
+              return { message = "port must be a number, found '" .. c.captures.port .. "'" }
+            end
+            if n < 1 or n > 65535 then
+              return { message = "port must be 1-65535, found " .. n }
+            end
+            return nil
+          end

@@ -14,6 +14,10 @@ rules:
     severity: warning
 ```
 
+**New to declint?** [`doc/tutorial.md`](doc/tutorial.md) builds an INI
+linter step by step — first rules, scoped sections, Lua callbacks, and
+the editor payoff — in about 30 minutes.
+
 ## Quick start
 
 ```sh

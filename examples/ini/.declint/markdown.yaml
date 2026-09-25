@@ -1,0 +1,16 @@
+# Markdown rules — demonstrates a second per-language config sharing the
+# .declint/ directory. Note that `no-tabs` also exists in ini.yaml: ids
+# must be unique per file, not across the directory.
+
+version: 1
+languages: [markdown]
+rules:
+  - id: no-tabs
+    pattern: '\t+'
+    message: "Tab character — use spaces"
+    severity: warning
+
+  - id: bare-url
+    pattern: '(?m)https?://\S+$'
+    message: "bare URL — wrap it in angle brackets"
+    severity: hint
