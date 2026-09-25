@@ -6,8 +6,9 @@ order. This document is the runbook.
 ## One-time setup
 
 - [ ] Create a crates.io account and `cargo login`.
-- [ ] Fill in `repository` in every `crates/*/Cargo.toml` (currently
-      `https://github.com/your-org/declint` placeholders).
+- [ ] Verify `repository` in every `crates/*/Cargo.toml` points at
+      `https://github.com/thyrgle/declint` (and that the repository is
+      public, or crates.io will just show a dead link).
 - [ ] Optional: `rustup install stable` is enough; no nightly needed.
 
 ## Per release

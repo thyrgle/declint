@@ -288,7 +288,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: your-org/declint@v0        # the composite action in this repo
+      - uses: thyrgle/declint@v0        # the composite action in this repo
         with:
           path: .
           declint-version: "0.6.0"
