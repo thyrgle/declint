@@ -7,6 +7,7 @@ use std::path::Path;
 
 use serde_yaml::Value;
 
+use crate::callback::CallbackRef;
 use crate::template::Template;
 use crate::Severity;
 
@@ -28,7 +29,8 @@ pub struct ConfigError {
 }
 
 impl ConfigError {
-    pub(crate) fn new(message: impl Into<String>) -> Self {
+    /// Creates an error from a message alone (no file position).
+    pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
             line: None,
@@ -126,8 +128,12 @@ pub struct Rule {
     pub pattern: String,
     /// How serious a hit is (default: [`Severity::Warning`]).
     pub severity: Severity,
-    /// The message template, parsed and capture-validated.
-    pub message: Template,
+    /// The message template, parsed and capture-validated. Optional when
+    /// the rule has a `callback` (then it doubles as the message for
+    /// callbacks that return "violate with the default message").
+    pub message: Option<Template>,
+    /// The rule's callback reference, if any.
+    pub callback: Option<CallbackRef>,
     /// The compiled pattern — construction only succeeds when this is
     /// valid.
     pub(crate) regex: regex::Regex,
@@ -419,10 +425,10 @@ fn parse_rule(
 
     for key in map.keys() {
         if let Some(key) = key.as_str() {
-            if !matches!(key, "id" | "pattern" | "message" | "severity") {
+            if !matches!(key, "id" | "pattern" | "message" | "severity" | "callback") {
                 return Err(at_rule(format!(
                     "unknown key `{key}` (expected one of `id`, `pattern`, `message`, \
-                     `severity`)"
+                     `severity`, `callback`)"
                 )));
             }
         }
@@ -454,18 +460,38 @@ fn parse_rule(
     let regex = regex::Regex::new(&pattern)
         .map_err(|e| at_rule(format!("invalid pattern: {e}")))?;
 
-    let message_value = map
-        .get(Value::from("message"))
-        .ok_or_else(|| missing("message"))?;
-    let message_src = message_value
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| at_rule("`message` must be a non-empty string".into()))?;
-    let template = Template::parse(message_src)
-        .map_err(|e| at_rule(format!("invalid message template: {e}")))?;
-    template
-        .validate(&regex)
-        .map_err(|e| at_rule(format!("invalid message template: {e}")))?;
+    let callback = match map.get(Value::from("callback")) {
+        None => None,
+        Some(value) => match value.as_str().filter(|s| !s.is_empty()) {
+            Some(source) => Some(CallbackRef::parse(source)),
+            None => {
+                return Err(at_rule("`callback` must be a non-empty string".into()));
+            }
+        },
+    };
+
+    let message = match map.get(Value::from("message")) {
+        None => {
+            if callback.is_none() {
+                return Err(at_rule(
+                    "rule must have a `message` (or a `callback` to compute one)".into(),
+                ));
+            }
+            None
+        }
+        Some(message_value) => {
+            let message_src = message_value
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| at_rule("`message` must be a non-empty string".into()))?;
+            let template = Template::parse(message_src)
+                .map_err(|e| at_rule(format!("invalid message template: {e}")))?;
+            template
+                .validate(&regex)
+                .map_err(|e| at_rule(format!("invalid message template: {e}")))?;
+            Some(template)
+        }
+    };
 
     let severity = match map.get(Value::from("severity")) {
         None => Severity::Warning,
@@ -484,7 +510,8 @@ fn parse_rule(
         id,
         pattern,
         severity,
-        message: template,
+        message,
+        callback,
         regex,
     })
 }

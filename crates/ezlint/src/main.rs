@@ -67,13 +67,30 @@ fn load_set(config: Option<&PathBuf>) -> ConfigSet {
     }
 }
 
+fn load_callbacks(set: &ConfigSet) -> ezlint_core::Callbacks {
+    let mut callbacks = ezlint_core::Callbacks::new();
+    if let Err(e) = ezlint_lua::attach(set, &mut callbacks) {
+        eprintln!("ezlint: {e}");
+        std::process::exit(2);
+    }
+    callbacks
+}
+
 fn check(config: Option<&PathBuf>, language: Option<&String>, files: &[PathBuf]) -> ExitCode {
     let set = load_set(config);
-    let linters: Vec<_> = set
+    let callbacks = load_callbacks(&set);
+    let linters = set
         .configs()
         .iter()
-        .map(|named| ezlint_core::Linter::new(named.config.clone()))
-        .collect();
+        .map(|named| ezlint_core::Linter::new(named.config.clone(), &callbacks))
+        .collect::<Result<Vec<_>, _>>();
+    let linters = match linters {
+        Ok(linters) => linters,
+        Err(e) => {
+            eprintln!("ezlint: {e}");
+            return ExitCode::from(2);
+        }
+    };
 
     let mut total = 0usize;
     let mut unreadable = 0usize;
@@ -91,12 +108,16 @@ fn check(config: Option<&PathBuf>, language: Option<&String>, files: &[PathBuf])
         let detected = language
             .map(String::as_str)
             .or(inferred.as_deref());
+        let info = ezlint_core::DocInfo {
+            path: &path.display().to_string(),
+            language: detected.unwrap_or(""),
+        };
         let mut violations = Vec::new();
         for (i, named) in set.configs().iter().enumerate() {
             if !named.config.matches_language(detected.unwrap_or("")) {
                 continue;
             }
-            violations.extend(linters[i].lint_all(&source));
+            violations.extend(linters[i].lint_all_in(info, &source));
         }
         violations.sort();
         for violation in &violations {
@@ -128,7 +149,8 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Serve { config } => {
             let set = load_set(config.as_ref());
-            match ezlint_lsp::serve(set) {
+            let callbacks = load_callbacks(&set);
+            match ezlint_lsp::serve(set, &callbacks) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("ezlint: server error: {e}");

@@ -81,8 +81,12 @@ languages: [markdown, sh] # optional; editor language ids this config applies
 rules:                    # file-global rules; optional if `scopes` is present
   - id: rule-name         # required; unique; becomes the diagnostic's code
     pattern: '\t+'        # required; Rust `regex` crate syntax (no lookaround)
-    message: "..."        # required; see templates below
+    message: "..."        # required unless `callback` is present; see templates
     severity: warning     # optional: error | warning | info | hint (default warning)
+    callback: |           # optional; Lua snippet or `checks/foo.lua` path,
+      return function(c)  # see "Callbacks" below
+        return nil
+      end
 scopes:                   # optional; see "Scoped rules" below
   - id: scope-name        # unique; shares a namespace with rule ids
     start: '...'          # required; starts a region (multi-line `^`/`$`)
@@ -107,6 +111,47 @@ ezlint: rules.yaml:5: rule 0 ('no-tabs'): invalid pattern: repetition operator m
 | `{{` / `}}` | literal braces |
 
 Unknown placeholder names are a config error, caught at load time.
+
+### Callbacks
+
+For decisions a message template can't express, a rule can run a **Lua
+callback** instead of (or alongside) a `message`. The `callback:` value is
+either an inline block scalar or a path to a `.lua` file (relative to the
+config); the snippet must `return function(ctx) ... end`:
+
+```yaml
+rules:
+  - id: todo-ticket
+    pattern: 'TODO:[ \t]*(?<ticket>\S*)'
+    severity: warning
+    callback: |
+      return function(ctx)
+        if ctx.captures.ticket == "" then
+          return { severity = "warning", message = "TODO without a ticket" }
+        end
+        return nil          -- cites a ticket -> allowed
+      end
+```
+
+The callback receives one table — `match`, `captures` (named and
+`"1"`-numbered), `start`/`finish` (byte offsets), `line`/`col` (1-based),
+`path`, `language`, `rule` — and decides:
+
+| Return | Meaning |
+|--------|---------|
+| `nil` / `false` | **allowed** — no diagnostic for this match |
+| `true` | violate, using the rule's own `message` template |
+| `{ message = "...", severity = "..." }` | violate with overrides (`severity` optional) |
+| thrown Lua error | an `error`-severity diagnostic names the rule; the run continues |
+
+Every call runs under an instruction budget, so a runaway loop fails as a
+diagnostic instead of hanging the editor. Snippets are compiled when the
+config loads — a syntax error is a config error with the rule id.
+
+Rust embedders can skip Lua entirely: implement
+`ezlint_core::MatchCallback` and register it by name
+(`Callbacks::register("my_check", ...)`), then reference it in YAML as
+`callback: my_check`.
 
 ### Scoped rules
 
@@ -180,12 +225,12 @@ filter, style, and (later) suppress per rule.
 
 ## Roadmap
 
-- v2: nested scopes (a scope inside a scope), rule callbacks (Rust
-  snippets with a compile cache, and Lua), `fix:` templates → LSP
-  CodeActions, inline `# ezlint:disable=<id>` comments, per-rule file
-  globs.
+- v2: nested scopes (a scope inside a scope), callback `range` overrides,
+  per-rule instruction budgets, `fix:` templates → LSP CodeActions,
+  inline `# ezlint:disable=<id>` comments, per-rule file globs.
 
 ## Status
 
-0.3.0 — hidden configs with directory discovery, per-language configs,
-scoped rules; the schema is versioned to keep future configs compatible.
+0.4.0 — Lua match callbacks (inline and file), hidden configs with
+directory discovery, per-language configs, scoped rules; the schema is
+versioned to keep future configs compatible.

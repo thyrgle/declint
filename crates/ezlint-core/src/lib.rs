@@ -16,12 +16,14 @@
 //! ```
 //! use ezlint_core::{Config, Linter};
 //!
-//! # fn main() -> Result<(), ezlint_core::ConfigError> {
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use ezlint_core::{Callbacks, Config, Linter};
+//!
 //! let config = Config::from_str(
 //!     "version: 1\nrules:\n  - id: no-tabs\n    pattern: '\\t+'\n    message: \"Use \
 //!      spaces\"\n    severity: warning\n",
 //! )?;
-//! let linter = Linter::new(config);
+//! let linter = Linter::new(config, &Callbacks::new())?;
 //!
 //! let violations = linter.lint("a\tb");
 //! assert_eq!(violations.len(), 1);
@@ -58,6 +60,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+mod callback;
 mod config;
 mod config_set;
 mod lang;
@@ -65,10 +68,11 @@ mod linter;
 mod scopes;
 mod template;
 
+pub use callback::{Callbacks, CallbackRef, Decision, MatchCallback, MatchContext};
 pub use config::{Config, ConfigError, Rule, Scope, SUPPORTED_VERSION};
 pub use config_set::{ConfigSet, NamedConfig, ScopeEntry, CONFIG_DIR, CONFIG_FILE, LEGACY_CONFIG_FILE};
 pub use lang::language_from_extension;
-pub use linter::{line_col, Linter, Span, Violation};
+pub use linter::{line_col, DocInfo, Linter, Span, Violation};
 pub use scopes::{segment, segment_all};
 pub use template::Template;
 

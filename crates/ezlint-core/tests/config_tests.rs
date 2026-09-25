@@ -57,7 +57,10 @@ fn missing_rule_keys_are_reported() {
     let e = err("version: 1\nrules:\n  - id: r\n    message: m\n");
     assert!(e.contains("missing `pattern` key"), "{e}");
     let e = err("version: 1\nrules:\n  - id: r\n    pattern: x\n");
-    assert!(e.contains("missing `message` key"), "{e}");
+    assert!(
+        e.contains("rule 0 ('r'): rule must have a `message`"),
+        "{e}"
+    );
 }
 
 #[test]

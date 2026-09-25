@@ -15,6 +15,16 @@ rules:
     pattern: '\\t+'
     message: \"Use spaces, found '{match}'\"
     severity: warning
+  - id: loud-todo
+    pattern: 'TODO(?<bang>!*)'
+    message: fallback
+    callback: |
+      return function(c)
+        if c.captures.bang == \"\" then
+          return nil
+        end
+        return { severity = \"error\", message = \"loud TODO: \" .. #c.captures.bang .. \" bangs\" }
+      end
 scopes:
   - id: shell
     start: '^```sh$'
@@ -26,9 +36,10 @@ scopes:
         severity: error
 ";
 
-/// A tab on line 0 (global rule) and a shell fence around a `sudo` on
-/// line 2 (scoped rule).
-const SOURCE: &str = "def x = 1;\t# note\n```sh\nsudo ls -la /\n```\n";
+/// A tab on line 0 (global rule), a loud TODO on line 2 (callback rule:
+/// bangs -> violation, quiet -> allowed), and a shell fence around a
+/// `sudo` on line 4 (scoped rule).
+const SOURCE: &str = "def x = 1;\t# note\n# quiet TODO\n# loud TODO!!!\n```sh\nsudo ls -la /\n```\n";
 
 fn spawn_server(config_path: &str) -> (Child, ChildStdin, Receiver<String>) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_ezlint"))
@@ -168,7 +179,7 @@ fn ezlint_server_smoke() {
     );
     let diags = wait_for_diagnostics(&rx, Some(0));
     let diags = diags.as_array().unwrap();
-    assert_eq!(diags.len(), 2, "tab + sudo must be flagged");
+    assert_eq!(diags.len(), 3, "tab + loud TODO + sudo must be flagged");
 
     let tab = diags
         .iter()
@@ -184,12 +195,22 @@ fn ezlint_server_smoke() {
     assert_eq!(tab["range"]["start"]["line"], 0);
     assert_eq!(tab["range"]["start"]["character"], 10);
 
+    // The Lua callback: the quiet TODO on line 1 is allowed, the loud
+    // one on line 2 produces a callback-computed message.
+    let todo = diags
+        .iter()
+        .find(|d| d["code"] == "loud-todo")
+        .expect("loud-todo diagnostic");
+    assert_eq!(todo["severity"], 1, "callback overrode to error");
+    assert_eq!(todo["message"], "loud TODO: 3 bangs");
+    assert_eq!(todo["range"]["start"]["line"], 2);
+
     let sudo = diags
         .iter()
         .find(|d| d["code"] == "no-sudo")
         .expect("no-sudo diagnostic");
     assert_eq!(sudo["severity"], 1, "error");
-    assert_eq!(sudo["range"]["start"]["line"], 2);
+    assert_eq!(sudo["range"]["start"]["line"], 4);
     assert_eq!(sudo["range"]["start"]["character"], 0);
 
     // Incremental didChange: replace the tab (line 0, char 10..11) with a
@@ -212,8 +233,12 @@ fn ezlint_server_smoke() {
     );
     let diags = wait_for_diagnostics(&rx, Some(1));
     let diags = diags.as_array().unwrap();
-    assert_eq!(diags.len(), 1, "only the scoped sudo survives");
-    assert_eq!(diags[0]["code"], "no-sudo");
+    assert_eq!(diags.len(), 2, "the scoped sudo and the loud TODO survive");
+    let codes: Vec<&str> = diags
+        .iter()
+        .map(|d| d["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(codes, ["loud-todo", "no-sudo"]);
 
     // A document whose languageId does not match the config's
     // `languages` gets an empty publish, even with violations present.

@@ -19,11 +19,14 @@
 //! # Examples
 //!
 //! ```
-//! use ezlint_core::{ConfigSet, CONFIG_FILE};
+//! use ezlint_core::{Callbacks, ConfigSet};
 //! # fn get_config_dir() -> String { String::new() }
-//! # fn not_run() {
-//! let set = ConfigSet::discover(std::path::Path::new(&get_config_dir())).unwrap();
-//! ezlint_lsp::serve(set).unwrap();
+//! # fn not_run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+//! let set = ConfigSet::discover(std::path::Path::new(&get_config_dir()))?;
+//! let mut callbacks = Callbacks::new();
+//! ezlint_lua::attach(&set, &mut callbacks)?;
+//! ezlint_lsp::serve(set, &callbacks)?;
+//! # Ok(())
 //! # }
 //! ```
 
@@ -33,7 +36,7 @@
 use std::error::Error;
 
 use ezlint_core::{
-    segment_all, ConfigSet, Linter, Scope, Severity, Violation,
+    segment_all, Callbacks, ConfigError, ConfigSet, DocInfo, Linter, Scope, Severity, Violation,
 };
 use increparse::{Engine, Outcome, Pass, Span};
 use increparse_lsp::{Document, SimpleLanguage};
@@ -160,8 +163,13 @@ fn tree_segments(doc: &Document<Ctx>) -> Vec<(usize, ezlint_core::Span)> {
 /// your own server.
 ///
 /// Only configs whose `languages` match the document's `languageId`
-/// contribute diagnostics.
-pub fn language(set: ConfigSet) -> SimpleLanguage<Ctx> {
+/// contribute diagnostics. Rules referencing callbacks that are not in
+/// `callbacks` make this fail — Lua callbacks come from
+/// `ezlint_lua::attach`.
+pub fn language(
+    set: ConfigSet,
+    callbacks: &Callbacks,
+) -> Result<SimpleLanguage<Ctx>, ConfigError> {
     let table = set.scope_table();
     // Global scope index -> (config index, local scope index).
     let owners: Vec<(usize, usize)> =
@@ -170,8 +178,8 @@ pub fn language(set: ConfigSet) -> SimpleLanguage<Ctx> {
     let linters: Vec<Linter> = set
         .configs()
         .iter()
-        .map(|named| Linter::new(named.config.clone()))
-        .collect();
+        .map(|named| Linter::new(named.config.clone(), callbacks))
+        .collect::<Result<_, _>>()?;
     let languages: Vec<Vec<String>> = set
         .configs()
         .iter()
@@ -179,8 +187,12 @@ pub fn language(set: ConfigSet) -> SimpleLanguage<Ctx> {
         .collect();
 
     let engine = Engine::with((Segmenter { scopes }, Accept));
-    SimpleLanguage::new(engine, Ctx::Root).extra_diagnostics(move |doc| {
+    Ok(SimpleLanguage::new(engine, Ctx::Root).extra_diagnostics(move |doc| {
         let text = doc.text();
+        let info = DocInfo {
+            path: doc.uri().as_str(),
+            language: doc.language_id(),
+        };
         // Group the tree's regions per config, remapping global scope
         // indices to each config's local ones.
         let mut per_config: Vec<Vec<(usize, ezlint_core::Span)>> =
@@ -198,26 +210,30 @@ pub fn language(set: ConfigSet) -> SimpleLanguage<Ctx> {
             if !applies {
                 continue;
             }
-            violations.extend(linter.lint_merged(text, &per_config[i]));
+            violations.extend(linter.lint_merged_in(info, text, &per_config[i]));
         }
         violations.sort();
         violations
             .iter()
             .map(|violation| diagnostic(doc, violation))
             .collect()
-    })
+    }))
 }
 
 /// Runs an ezlint language server on stdio until the client sends
 /// `shutdown` + `exit`.
-pub fn serve(set: ConfigSet) -> Result<(), Box<dyn Error + Send + Sync>> {
-    increparse_lsp::serve(language(set))
+pub fn serve(
+    set: ConfigSet,
+    callbacks: &Callbacks,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let language = language(set, callbacks)?;
+    increparse_lsp::serve(language)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ezlint_core::Config;
+    use ezlint_core::{Callbacks, Config};
     use increparse::{CancelToken, SerialExecutor};
     use increparse_lsp::PositionEncoding;
     use lsp_types::Uri;
@@ -261,6 +277,10 @@ scopes:
         ConfigSet::discover(&dir).unwrap()
     }
 
+    fn language_from(yamls: &[&str]) -> SimpleLanguage<Ctx> {
+        language(set_from(yamls), &Callbacks::new()).unwrap()
+    }
+
     fn doc_with(language_id: &str, text: &str) -> Document<Ctx> {
         let uri: Uri = "file:///t.txt".parse().unwrap();
         let mut doc = Document::open(
@@ -271,7 +291,7 @@ scopes:
             PositionEncoding::Utf16,
             Ctx::Root,
         );
-        let lang = language(set_from(&[SH_YAML, ANY_YAML]));
+        let lang = language_from(&[SH_YAML, ANY_YAML]);
         doc.apply_changes(
             lang.engine(),
             0,
@@ -294,7 +314,7 @@ scopes:
 
     #[test]
     fn language_id_selects_configs() {
-        let lang = language(set_from(&[SH_YAML, ANY_YAML]));
+        let lang = language_from(&[SH_YAML, ANY_YAML]);
         // A shell doc gets rules from both configs; a python doc only the
         // unrestricted one.
         let sh_doc = doc_with("sh", "sudo\tx\n");
@@ -311,7 +331,7 @@ scopes:
 
     #[test]
     fn scoped_regions_from_any_config_are_linted() {
-        let lang = language(set_from(&[ANY_YAML]));
+        let lang = language_from(&[ANY_YAML]);
         let text = "danger\t\n```sh\ndanger\n```\n";
         let doc = doc_with("", text);
         let diags = Language::extra_diagnostics(&lang, &doc);
@@ -324,7 +344,7 @@ scopes:
 
     #[test]
     fn edits_outside_regions_keep_them() {
-        let lang = language(set_from(&[ANY_YAML]));
+        let lang = language_from(&[ANY_YAML]);
         let mut doc = doc_with("", "danger\t\n```sh\ndanger\n```\n");
         let before = tree_segments(&doc);
 
@@ -347,8 +367,56 @@ scopes:
     #[test]
     fn single_config_still_works() {
         let config = Config::from_str(SH_YAML).unwrap();
-        let lang = language(ConfigSet::single(config));
+        let lang = language(ConfigSet::single(config), &Callbacks::new()).unwrap();
         let doc = doc_with("sh", "sudo\n");
         assert_eq!(codes(&Language::extra_diagnostics(&lang, &doc)), ["no-sudo"]);
+    }
+
+    #[test]
+    fn unregistered_callback_fails_language_build() {
+        let yaml = "\
+version: 1
+rules:
+  - id: probe
+    pattern: 'x'
+    callback: nope
+";
+        let set = set_from(&[yaml]);
+        assert!(language(set, &Callbacks::new()).is_err());
+    }
+
+    #[test]
+    fn lua_callbacks_flow_through_diagnostics() {
+        let yaml = "\
+version: 1
+rules:
+  - id: loud-todo
+    pattern: 'TODO(?<bang>!*)'
+    message: fallback
+    callback: |
+      return function(c)
+        if c.captures.bang == \"\" then
+          return nil
+        end
+        return { severity = \"error\", message = \"loud TODO with \" .. #c.captures.bang .. \" bangs\" }
+      end
+";
+        let set = set_from(&[yaml]);
+        let mut callbacks = Callbacks::new();
+        ezlint_lua::attach(&set, &mut callbacks).unwrap();
+        let lang = language(set, &callbacks).unwrap();
+
+        // A quiet TODO is allowed; a loud one becomes an error.
+        let doc = doc_with("", "quiet TODO here\nloud TODO!! here\n");
+        let diags = Language::extra_diagnostics(&lang, &doc);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].severity, Some(lsp_severity(Severity::Error)));
+        let code = match diags[0].code.as_ref().unwrap() {
+            NumberOrString::String(s) => s.as_str(),
+            _ => unreachable!(),
+        };
+        assert_eq!(code, "loud-todo");
+        assert_eq!(diags[0].message, "loud TODO with 2 bangs");
+        assert_eq!(diags[0].range.start.line, 1);
     }
 }

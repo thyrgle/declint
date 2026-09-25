@@ -1,8 +1,33 @@
 //! The lint engine: compiled rules in, [`Violation`]s out.
 
-use crate::config::{Config, Rule, Scope};
+use std::collections::HashMap;
+use std::fmt;
+use std::sync::Arc;
+
+use crate::callback::{Callbacks, Decision, MatchCallback, MatchContext};
+use crate::config::{Config, ConfigError, Rule, Scope};
 use crate::scopes;
 use crate::Severity;
+
+/// Per-document information callbacks can see: the file's path and
+/// language id. Empty strings are fine when the caller has neither.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DocInfo<'a> {
+    /// The file's path, as shown to the user.
+    pub path: &'a str,
+    /// The document's language id.
+    pub language: &'a str,
+}
+
+impl<'a> DocInfo<'a> {
+    /// No path, no language.
+    pub fn none() -> Self {
+        Self {
+            path: "",
+            language: "",
+        }
+    }
+}
 
 /// A byte range in the linted source.
 ///
@@ -77,20 +102,58 @@ impl Ord for Violation {
 }
 
 /// A compiled, ready-to-run rule set.
-#[derive(Debug, Clone)]
 pub struct Linter {
     rules: Vec<Rule>,
     scopes: Vec<Scope>,
+    /// Resolved rule callback implementations, keyed by rule id. Rules
+    /// without a callback are absent.
+    callbacks: HashMap<String, Arc<dyn MatchCallback>>,
 }
 
 impl Linter {
-    /// Compiles a config into a linter. Infallible: every rule was
-    /// validated at config-load time.
-    pub fn new(config: Config) -> Self {
-        Self {
+    /// Compiles a config into a linter, resolving every rule's callback
+    /// against `callbacks`. Errors only when a rule references a callback
+    /// that is not registered — patterns themselves were validated at
+    /// config-load time.
+    pub fn new(config: Config, callbacks: &Callbacks) -> Result<Self, ConfigError> {
+        let mut resolved = HashMap::new();
+        let mut reference = |rule: &Rule, scope: Option<&Scope>| -> Result<(), ConfigError> {
+            match &rule.callback {
+                None => Ok(()),
+                Some(r) => match callbacks.resolve(r) {
+                    Some(callback) => {
+                        resolved.insert(rule.id.clone(), callback);
+                        Ok(())
+                    }
+                    None => match scope {
+                        Some(scope) => Err(ConfigError::new(format!(
+                            "scope '{}' rule '{}' references {} which is not registered",
+                            scope.id,
+                            rule.id,
+                            r.describe()
+                        ))),
+                        None => Err(ConfigError::new(format!(
+                            "rule '{}' references {} which is not registered",
+                            rule.id,
+                            r.describe()
+                        ))),
+                    },
+                },
+            }
+        };
+        for rule in &config.rules {
+            reference(rule, None)?;
+        }
+        for scope in &config.scopes {
+            for rule in &scope.rules {
+                reference(rule, Some(scope))?;
+            }
+        }
+        Ok(Self {
             rules: config.rules,
             scopes: config.scopes,
-        }
+            callbacks: resolved,
+        })
     }
 
     /// The global rules, in config order.
@@ -108,8 +171,14 @@ impl Linter {
     /// span end, then rule id) so output is deterministic regardless of
     /// rule order. Zero-width matches are skipped.
     pub fn lint(&self, source: &str) -> Vec<Violation> {
+        self.lint_in(DocInfo::none(), source)
+    }
+
+    /// Like [`Linter::lint`], with file path and language exposed to
+    /// callbacks.
+    pub fn lint_in(&self, info: DocInfo<'_>, source: &str) -> Vec<Violation> {
         let mut out = Vec::new();
-        self.collect_global(source, &mut out);
+        self.collect_global(info, source, &mut out);
         sort_violations(&mut out);
         out
     }
@@ -118,8 +187,19 @@ impl Linter {
     /// `(scope index, region)` pairs, typically from [`scopes::segment_all`]
     /// or a parse tree's scoped nodes.
     pub fn lint_segments(&self, source: &str, segments: &[(usize, Span)]) -> Vec<Violation> {
+        self.lint_segments_in(DocInfo::none(), source, segments)
+    }
+
+    /// Like [`Linter::lint_segments`], with file path and language
+    /// exposed to callbacks.
+    pub fn lint_segments_in(
+        &self,
+        info: DocInfo<'_>,
+        source: &str,
+        segments: &[(usize, Span)],
+    ) -> Vec<Violation> {
         let mut out = Vec::new();
-        self.collect_segments(source, segments, &mut out);
+        self.collect_segments(info, source, segments, &mut out);
         sort_violations(&mut out);
         out
     }
@@ -128,9 +208,20 @@ impl Linter {
     /// one call for consumers that already have regions (e.g. a parse
     /// tree).
     pub fn lint_merged(&self, source: &str, segments: &[(usize, Span)]) -> Vec<Violation> {
+        self.lint_merged_in(DocInfo::none(), source, segments)
+    }
+
+    /// Like [`Linter::lint_merged`], with file path and language exposed
+    /// to callbacks.
+    pub fn lint_merged_in(
+        &self,
+        info: DocInfo<'_>,
+        source: &str,
+        segments: &[(usize, Span)],
+    ) -> Vec<Violation> {
         let mut out = Vec::new();
-        self.collect_global(source, &mut out);
-        self.collect_segments(source, segments, &mut out);
+        self.collect_global(info, source, &mut out);
+        self.collect_segments(info, source, segments, &mut out);
         sort_violations(&mut out);
         out
     }
@@ -138,40 +229,130 @@ impl Linter {
     /// Segments the source itself, then lints everything — the one-liner
     /// for CLI use.
     pub fn lint_all(&self, source: &str) -> Vec<Violation> {
-        let segments = scopes::segment_all(source, &self.scopes);
-        self.lint_merged(source, &segments)
+        self.lint_all_in(DocInfo::none(), source)
     }
 
-    fn collect_global(&self, source: &str, out: &mut Vec<Violation>) {
+    /// Like [`Linter::lint_all`], with file path and language exposed to
+    /// callbacks.
+    pub fn lint_all_in(&self, info: DocInfo<'_>, source: &str) -> Vec<Violation> {
+        let segments = scopes::segment_all(source, &self.scopes);
+        self.lint_merged_in(info, source, &segments)
+    }
+
+    fn collect_global(&self, info: DocInfo<'_>, source: &str, out: &mut Vec<Violation>) {
         for rule in &self.rules {
-            collect_rule(rule, source, 0, out);
+            let callback = self.callbacks.get(&rule.id).map(|a| a.as_ref());
+            collect_rule(rule, callback, info, source, source, 0, out);
         }
     }
 
-    fn collect_segments(&self, source: &str, segments: &[(usize, Span)], out: &mut Vec<Violation>) {
+    fn collect_segments(
+        &self,
+        info: DocInfo<'_>,
+        source: &str,
+        segments: &[(usize, Span)],
+        out: &mut Vec<Violation>,
+    ) {
         for &(scope_index, segment) in segments {
             let Some(scope) = self.scopes.get(scope_index) else {
                 continue;
             };
             let region = &source[segment.to_range()];
             for rule in &scope.rules {
-                collect_rule(rule, region, segment.start, out);
+                let callback = self.callbacks.get(&rule.id).map(|a| a.as_ref());
+                collect_rule(rule, callback, info, source, region, segment.start, out);
             }
         }
     }
 }
 
-fn collect_rule(rule: &Rule, text: &str, offset: usize, out: &mut Vec<Violation>) {
+impl fmt::Debug for Linter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Linter")
+            .field("rules", &self.rules.len())
+            .field("scopes", &self.scopes.len())
+            .field("callbacks", &self.callbacks.len())
+            .finish()
+    }
+}
+
+fn collect_rule(
+    rule: &Rule,
+    callback: Option<&dyn MatchCallback>,
+    info: DocInfo<'_>,
+    source: &str,
+    text: &str,
+    offset: usize,
+    out: &mut Vec<Violation>,
+) {
     for caps in rule.regex.captures_iter(text) {
         let whole = match caps.get(0) {
             Some(m) if !m.is_empty() => m,
             _ => continue,
         };
+        let (severity, message) = match callback {
+            None => (
+                rule.severity,
+                rule.message
+                    .as_ref()
+                    .map_or_else(String::new, |t| t.render(&caps)),
+            ),
+            Some(callback) => {
+                let start = offset + whole.start();
+                let (line, col) = crate::line_col(source, start);
+                let group_names: Vec<Option<&str>> = rule.regex.capture_names().collect();
+                let captures: Vec<(String, String)> = caps
+                    .iter()
+                    .enumerate()
+                    .skip(1)
+                    .filter_map(|(i, group)| {
+                        let group = group?;
+                        let name = group_names
+                            .get(i)
+                            .cloned()
+                            .flatten()
+                            .map_or_else(|| i.to_string(), str::to_string);
+                        Some((name, group.as_str().to_string()))
+                    })
+                    .collect();
+                let ctx = MatchContext {
+                    path: info.path.to_string(),
+                    language: info.language.to_string(),
+                    rule_id: rule.id.clone(),
+                    start,
+                    finish: offset + whole.end(),
+                    line,
+                    col,
+                    match_text: whole.as_str().to_string(),
+                    captures,
+                };
+                match callback.evaluate(&ctx) {
+                    Err(e) => (
+                        Severity::Error,
+                        format!("rule '{}': callback error: {e}", rule.id),
+                    ),
+                    Ok(Decision::Allow) => continue,
+                    Ok(Decision::Violate { severity, message }) => {
+                        (severity.unwrap_or(rule.severity), message)
+                    }
+                    Ok(Decision::ViolateDefault) => match rule.message.as_ref() {
+                        Some(template) => (rule.severity, template.render(&caps)),
+                        None => (
+                            Severity::Error,
+                            format!(
+                                "rule '{}': callback violated without a default message",
+                                rule.id
+                            ),
+                        ),
+                    },
+                }
+            }
+        };
         out.push(Violation {
             rule_id: rule.id.clone(),
-            severity: rule.severity,
+            severity,
             span: Span::new(offset + whole.start(), offset + whole.end()),
-            message: rule.message.render(&caps),
+            message,
         });
     }
 }
@@ -201,7 +382,8 @@ mod tests {
     use crate::Config;
 
     fn linter(yaml: &str) -> Linter {
-        Linter::new(Config::from_str(yaml).unwrap())
+        let config = Config::from_str(yaml).unwrap();
+        Linter::new(config, &Callbacks::new()).unwrap()
     }
 
     fn basic_yaml(pattern: &str, id: &str) -> String {

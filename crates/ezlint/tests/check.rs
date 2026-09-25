@@ -117,3 +117,37 @@ fn no_config_found_exits_two() {
     assert!(stderr.contains("no ezlint config found"), "{stderr}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn check_runs_lua_callbacks() {
+    let dir = std::env::temp_dir().join(format!("ezlint-check-cb-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    write(
+        &dir.join(".ezlint.yaml"),
+        "\
+version: 1
+rules:
+  - id: todo-ticket
+    pattern: 'TODO:[ \t]*(?<ticket>\\S*)'
+    callback: |
+      return function(c)
+        if c.captures.ticket == \"\" then
+          return { severity = \"warning\", message = \"TODO without a ticket (\" .. c.path .. \":\" .. c.line .. \")\" }
+        end
+        return nil
+      end
+",
+    );
+    write(&dir.join("a.md"), "TODO:\nTODO: EZ-123\n");
+
+    // No --config: discovery. The TODO with a ticket is allowed; the
+    // bare TODO is flagged with the callback's message (path + line).
+    let (stdout, _stderr, code) = run_check(&dir, &["a.md"]);
+    assert_eq!(code, Some(1), "{stdout}");
+    assert_eq!(stdout.lines().count(), 1, "{stdout}");
+    assert!(
+        stdout.contains("a.md:1:1: warning[todo-ticket]: TODO without a ticket (a.md:1)"),
+        "{stdout}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
