@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use ezlint_core::{language_from_extension, ConfigSet, CONFIG_FILE};
+use declint_core::{language_from_extension, ConfigSet, CONFIG_FILE};
 
 fn write(path: &Path, content: &str) {
     if let Some(parent) = path.parent() {
@@ -21,7 +21,7 @@ rules:
 
 #[test]
 fn loads_hidden_file() {
-    let dir = std::env::temp_dir().join(format!("ezlint-cs-{}-file", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("declint-cs-{}-file", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     write(&dir.join(CONFIG_FILE), RULES);
     let set = ConfigSet::discover(&dir).unwrap();
@@ -31,15 +31,15 @@ fn loads_hidden_file() {
 
 #[test]
 fn loads_directory_of_configs_sorted() {
-    let dir = std::env::temp_dir().join(format!("ezlint-cs-{}-dir", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("declint-cs-{}-dir", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let ezlint = dir.join(".ezlint");
+    let declint = dir.join(".declint");
     write(
-        &ezlint.join("sh.yaml"),
+        &declint.join("sh.yaml"),
         "version: 1\nlanguages: [sh]\nrules:\n  - id: dup\n    pattern: sudo\n    message: m\n",
     );
     write(
-        &ezlint.join("markdown.yaml"),
+        &declint.join("markdown.yaml"),
         "version: 1\nlanguages: [markdown]\nrules:\n  - id: dup\n    pattern: todo\n    message: m\n",
     );
     let set = ConfigSet::discover(&dir).unwrap();
@@ -62,9 +62,9 @@ fn loads_directory_of_configs_sorted() {
 
 #[test]
 fn empty_config_directory_is_an_error() {
-    let dir = std::env::temp_dir().join(format!("ezlint-cs-{}-empty", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("declint-cs-{}-empty", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(dir.join(".ezlint")).unwrap();
+    std::fs::create_dir_all(dir.join(".declint")).unwrap();
     let e = ConfigSet::discover(&dir).unwrap_err();
     assert!(e.to_string().contains("no `.yaml`"), "{e}");
     std::fs::remove_dir_all(&dir).unwrap();
@@ -72,12 +72,12 @@ fn empty_config_directory_is_an_error() {
 
 #[test]
 fn discovery_walks_up_and_prefers_hidden() {
-    let root = std::env::temp_dir().join(format!("ezlint-cs-{}-walk", std::process::id()));
+    let root = std::env::temp_dir().join(format!("declint-cs-{}-walk", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     // Hidden file wins over the legacy file in the same directory...
     write(&root.join(CONFIG_FILE), RULES);
     write(
-        &root.join("ezlint.yaml"),
+        &root.join("declint.yaml"),
         "version: 1\nscopes: []\nrules: []\n",
     );
     // ...and a subdir with no config of its own finds the parent's.
@@ -90,12 +90,12 @@ fn discovery_walks_up_and_prefers_hidden() {
 
 #[test]
 fn legacy_file_beats_parent_directory_configs() {
-    let root = std::env::temp_dir().join(format!("ezlint-cs-{}-legacy", std::process::id()));
+    let root = std::env::temp_dir().join(format!("declint-cs-{}-legacy", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     write(&root.join(CONFIG_FILE), RULES);
     let sub = root.join("legacy-dir");
     write(
-        &sub.join("ezlint.yaml"),
+        &sub.join("declint.yaml"),
         "version: 1\nscopes: []\nrules: []\n",
     );
     // The nearer legacy file is the config site for its directory.
@@ -106,22 +106,22 @@ fn legacy_file_beats_parent_directory_configs() {
 
 #[test]
 fn discovery_nothing_found_is_an_error() {
-    let dir = std::env::temp_dir().join(format!("ezlint-cs-{}-none", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("declint-cs-{}-none", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let e = ConfigSet::discover(&dir).unwrap_err();
-    assert!(e.to_string().contains("no ezlint config found"), "{e}");
+    assert!(e.to_string().contains("no declint config found"), "{e}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
 fn scope_table_maps_global_to_local() {
-    let dir = std::env::temp_dir().join(format!("ezlint-cs-{}-scopes", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("declint-cs-{}-scopes", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let ezlint = dir.join(".ezlint");
+    let declint = dir.join(".declint");
     for (name, scope_id) in [("a.yaml", "s1"), ("b.yaml", "s2")] {
         write(
-            &ezlint.join(name),
+            &declint.join(name),
             &format!(
                 "version: 1\nscopes:\n  - id: {scope_id}\n    start: 'X'\n    rules:\n      - id: r-{scope_id}\n        pattern: p\n        message: m\n"
             ),

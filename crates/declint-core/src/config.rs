@@ -11,13 +11,13 @@ use crate::callback::CallbackRef;
 use crate::template::Template;
 use crate::Severity;
 
-/// The config schema version this ezlint understands.
+/// The config schema version this declint understands.
 pub const SUPPORTED_VERSION: u64 = 1;
 
 /// Everything that can go wrong while loading a config file.
 ///
 /// Carries a 1-based file line whenever the problem can be pinned to one
-/// (`ezlint.yaml:5: rule 0 ('no-tabs'): invalid pattern ...`). Rule-level
+/// (`declint.yaml:5: rule 0 ('no-tabs'): invalid pattern ...`). Rule-level
 /// errors point at the rule's `- ` entry line; YAML syntax errors point at
 /// the exact position reported by the parser.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,7 +200,7 @@ impl Config {
         if version != SUPPORTED_VERSION {
             return Err(ConfigError::at_line(
                 format!(
-                    "unsupported config version {version} (this ezlint understands version \
+                    "unsupported config version {version} (this declint understands version \
                      {SUPPORTED_VERSION})"
                 ),
                 None,

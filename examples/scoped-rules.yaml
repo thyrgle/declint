@@ -1,9 +1,9 @@
-# An example ezlint rule set with scoped rules.
+# An example declint rule set with scoped rules.
 #
 # Global rules apply everywhere; each scope's rules apply only inside that
-# scope's regions. Copy as `ezlint.yaml`, then:
-#   ezlint serve ezlint.yaml          # in your editor (LSP over stdio)
-#   ezlint check --config ezlint.yaml notes.md   # in CI
+# scope's regions. Copy as `declint.yaml`, then:
+#   declint serve declint.yaml          # in your editor (LSP over stdio)
+#   declint check --config declint.yaml notes.md   # in CI
 
 version: 1
 rules:

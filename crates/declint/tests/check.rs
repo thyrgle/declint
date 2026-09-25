@@ -1,4 +1,4 @@
-//! Integration tests for `ezlint check`: config discovery, language
+//! Integration tests for `declint check`: config discovery, language
 //! filtering, `--language` override, and exit codes.
 
 use std::path::Path;
@@ -13,15 +13,15 @@ fn write(path: &Path, content: &str) {
 
 /// Sets up:
 /// ```text
-/// project/.ezlint.yaml          languages: [markdown], rule no-sudo
+/// project/.declint.yaml          languages: [markdown], rule no-sudo
 /// project/notes.md              sudo          -> flagged (md -> markdown)
 /// project/script.sh             sudo          -> NOT flagged (sh not in languages)
 /// ```
 fn project(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("ezlint-check-{}-{tag}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("declint-check-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     write(
-        &dir.join(".ezlint.yaml"),
+        &dir.join(".declint.yaml"),
         "\
 version: 1
 languages: [markdown]
@@ -38,12 +38,12 @@ rules:
 }
 
 fn run_check(dir: &Path, args: &[&str]) -> (String, String, Option<i32>) {
-    let output = Command::new(env!("CARGO_BIN_EXE_ezlint"))
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
         .arg("check")
         .args(args)
         .current_dir(dir)
         .output()
-        .expect("spawn ezlint");
+        .expect("spawn declint");
     (
         String::from_utf8_lossy(&output.stdout).into_owned(),
         String::from_utf8_lossy(&output.stderr).into_owned(),
@@ -54,7 +54,7 @@ fn run_check(dir: &Path, args: &[&str]) -> (String, String, Option<i32>) {
 #[test]
 fn check_discovers_config_and_infers_language() {
     let dir = project("discover");
-    // No --config: discovery finds .ezlint.yaml. No --language: .md
+    // No --config: discovery finds .declint.yaml. No --language: .md
     // infers markdown, which the config targets; .sh does not.
     let (stdout, _stderr, code) = run_check(&dir, &["notes.md", "script.sh"]);
     assert_eq!(code, Some(1), "stdout: {stdout}");
@@ -82,24 +82,24 @@ fn language_flag_overrides_inference() {
 #[test]
 fn explicit_config_directory_and_clean_exit() {
     let dir = project("dir");
-    // Move the hidden file into a .ezlint/ directory config.
-    let ezlint_dir = dir.join(".ezlint");
-    std::fs::create_dir_all(&ezlint_dir).unwrap();
+    // Move the hidden file into a .declint/ directory config.
+    let declint_dir = dir.join(".declint");
+    std::fs::create_dir_all(&declint_dir).unwrap();
     std::fs::rename(
-        dir.join(".ezlint.yaml"),
-        ezlint_dir.join("docs.yaml"),
+        dir.join(".declint.yaml"),
+        declint_dir.join("docs.yaml"),
     )
     .unwrap();
 
     // Explicit --config pointing at the directory.
     let (stdout, _stderr, code) =
-        run_check(&dir, &["--config", ".ezlint", "notes.md"]);
+        run_check(&dir, &["--config", ".declint", "notes.md"]);
     assert_eq!(code, Some(1), "stdout: {stdout}");
     assert!(stdout.contains("notes.md:1:5: error[no-sudo]"), "{stdout}");
 
     // A clean file: no violations, exit 0.
     write(&dir.join("clean.md"), "all good\n");
-    let (stdout, stderr, code) = run_check(&dir, &["--config", ".ezlint", "clean.md"]);
+    let (stdout, stderr, code) = run_check(&dir, &["--config", ".declint", "clean.md"]);
     assert_eq!(code, Some(0));
     assert!(stdout.is_empty(), "{stdout}");
     assert!(stderr.contains("0 violation") || stderr.is_empty(), "{stderr}");
@@ -108,22 +108,22 @@ fn explicit_config_directory_and_clean_exit() {
 
 #[test]
 fn no_config_found_exits_two() {
-    let dir = std::env::temp_dir().join(format!("ezlint-check-none-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("declint-check-none-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     write(&dir.join("x.md"), "sudo\n");
     let (_stdout, stderr, code) = run_check(&dir, &["x.md"]);
     assert_eq!(code, Some(2), "{stderr}");
-    assert!(stderr.contains("no ezlint config found"), "{stderr}");
+    assert!(stderr.contains("no declint config found"), "{stderr}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
 fn check_runs_lua_callbacks() {
-    let dir = std::env::temp_dir().join(format!("ezlint-check-cb-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("declint-check-cb-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     write(
-        &dir.join(".ezlint.yaml"),
+        &dir.join(".declint.yaml"),
         "\
 version: 1
 rules:

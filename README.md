@@ -1,9 +1,9 @@
-# ezlint
+# declint
 
 A YAML-configured regex linter and language server, built on
 [increparse](../increparse). Describe lint rules in a small YAML file and get
-both an **LSP server** (`ezlint serve`, diagnostics in your editor as you
-type) and a **CLI** (`ezlint check`, for CI) — no Rust required.
+both an **LSP server** (`declint serve`, diagnostics in your editor as you
+type) and a **CLI** (`declint check`, for CI) — no Rust required.
 
 ```yaml
 version: 1
@@ -17,13 +17,13 @@ rules:
 ## Quick start
 
 ```sh
-cargo install --path crates/ezlint
+cargo install --path crates/declint
 
 # In CI: lint files, print violations, exit 1 if any were found.
-ezlint check src/**
+declint check src/**
 
 # In your editor: run a language server over stdio.
-ezlint serve           # reads ./ezlint.yaml
+declint serve           # reads ./declint.yaml
 ```
 
 ### Neovim setup
@@ -32,50 +32,50 @@ Any LSP client that launches a custom stdio server works. **Neovim**
 (with nvim-lspconfig):
 
 ```lua
-require('lspconfig.configs').ezlint = {
+require('lspconfig.configs').declint = {
   default_config = {
-    cmd = { 'ezlint', 'serve' },                -- discovers .ezlint.yaml / .ezlint/ itself
+    cmd = { 'declint', 'serve' },                -- discovers .declint.yaml / .declint/ itself
     filetypes = { 'markdown', 'sh' },           -- match your configs' languages
     root_dir = vim.fn.getcwd,
   },
 }
-require('lspconfig').ezlint.setup({})
+require('lspconfig').declint.setup({})
 ```
 
 The `filetypes` list should match the `languages:` keys in your configs —
-Neovim sends the filetype as the LSP `languageId`, and ezlint only
+Neovim sends the filetype as the LSP `languageId`, and declint only
 publishes diagnostics from configs whose `languages` match it. A file of
 any other filetype gets a clean (empty) diagnostic publish.
 
 ### VS Code
 
-Point a generic LSP client extension at `ezlint serve` with the filetypes
+Point a generic LSP client extension at `declint serve` with the filetypes
 you want.
 
 ## Config discovery
 
-With no explicit path, both `ezlint serve` and `ezlint check` look for a
+With no explicit path, both `declint serve` and `declint check` look for a
 **config site** starting at the current directory and walking up through
 parents. At each directory the search order is:
 
-1. `.ezlint.yaml` — a single hidden config file
-2. `.ezlint/` — a hidden directory; **every `*.yaml` inside is a config**
+1. `.declint.yaml` — a single hidden config file
+2. `.declint/` — a hidden directory; **every `*.yaml` inside is a config**
    (a natural layout for per-language rule files: `markdown.yaml`,
    `sh.yaml`, ...)
-3. `ezlint.yaml` — the legacy, non-hidden name, still accepted
+3. `declint.yaml` — the legacy, non-hidden name, still accepted
 
 The first hit wins. Ids must be unique *within* one config file, but
-different files in a `.ezlint/` directory may reuse them — only one
+different files in a `.declint/` directory may reuse them — only one
 language's configs apply to any given document, so codes stay
 unambiguous.
 
 ## Config reference
 
-The config file is `ezlint.yaml` by default (both subcommands take an
+The config file is `declint.yaml` by default (both subcommands take an
 explicit path too).
 
 ```yaml
-version: 1                # required; this ezlint understands version 1
+version: 1                # required; this declint understands version 1
 languages: [markdown, sh] # optional; editor language ids this config applies
                           # to (exact match; missing = all languages)
 rules:                    # file-global rules; optional if `scopes` is present
@@ -99,7 +99,7 @@ duplicate ids, unknown keys — and a bad config is rejected with the rule id
 and file line of the problem, e.g.:
 
 ```text
-ezlint: rules.yaml:5: rule 0 ('no-tabs'): invalid pattern: repetition operator missing expression
+declint: rules.yaml:5: rule 0 ('no-tabs'): invalid pattern: repetition operator missing expression
 ```
 
 ### Message templates
@@ -149,7 +149,7 @@ diagnostic instead of hanging the editor. Snippets are compiled when the
 config loads — a syntax error is a config error with the rule id.
 
 Rust embedders can skip Lua entirely: implement
-`ezlint_core::MatchCallback` and register it by name
+`declint_core::MatchCallback` and register it by name
 (`Callbacks::register("my_check", ...)`), then reference it in YAML as
 `callback: my_check`.
 
@@ -186,7 +186,7 @@ config.
 
 ### CLI language handling
 
-`ezlint check` decides each file's language in this order:
+`declint check` decides each file's language in this order:
 
 1. `--language <id>` — always wins (e.g. `--language markdown`)
 2. The file's extension, via a built-in table of common Neovim filetype
@@ -203,31 +203,31 @@ backreferences are not supported in v1.
 
 | Crate | Role |
 |-------|------|
-| [`crates/ezlint-core`](crates/ezlint-core) | Config loading/validation, message templates, the regex lint engine. No LSP dependencies. |
-| [`crates/ezlint-lsp`](crates/ezlint-lsp)   | The `serve()` language server: violations → LSP diagnostics via `increparse-lsp`. |
-| [`crates/ezlint`](crates/ezlint)           | The CLI binary (`serve` / `check`). |
+| [`crates/declint-core`](crates/declint-core) | Config loading/validation, message templates, the regex lint engine. No LSP dependencies. |
+| [`crates/declint-lsp`](crates/declint-lsp)   | The `serve()` language server: violations → LSP diagnostics via `increparse-lsp`. |
+| [`crates/declint`](crates/declint)           | The CLI binary (`serve` / `check`). |
 
-`ezlint-lsp::language(config)` also embeds into your own server if you
+`declint-lsp::language(config)` also embeds into your own server if you
 already have an `increparse-lsp`-based one.
 
 ## Design notes
 
 Linting here is a flat regex scan per document revision, so the parse tree
-stays trivial (one region, immediately done) — what ezlint reuses from
+stays trivial (one region, immediately done) — what declint reuses from
 increparse/`increparse-lsp` is the plumbing: incremental change
 translation, byte↔UTF-8/16/32 position conversion, document bookkeeping,
 and diagnostics publishing. Violations are merged into the same
 `publishDiagnostics` stream as parse diagnostics via the
 `SimpleLanguage::extra_diagnostics` hook.
 
-Diagnostics carry `source: "ezlint"` and `code: <rule-id>`, so clients can
+Diagnostics carry `source: "declint"` and `code: <rule-id>`, so clients can
 filter, style, and (later) suppress per rule.
 
 ## Roadmap
 
 - v2: nested scopes (a scope inside a scope), callback `range` overrides,
   per-rule instruction budgets, `fix:` templates → LSP CodeActions,
-  inline `# ezlint:disable=<id>` comments, per-rule file globs.
+  inline `# declint:disable=<id>` comments, per-rule file globs.
 
 ## Status
 

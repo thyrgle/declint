@@ -1,6 +1,6 @@
 //! Config loading and validation errors.
 
-use ezlint_core::{Config, Severity};
+use declint_core::{Config, Severity};
 
 fn err(yaml: &str) -> String {
     Config::from_str(yaml).unwrap_err().to_string()
@@ -111,7 +111,7 @@ fn errors_carry_line_numbers() {
 
 #[test]
 fn load_attaches_path() {
-    let dir = std::env::temp_dir().join(format!("ezlint-cfg-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("declint-cfg-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("bad.yaml");
     std::fs::write(&path, "version: 2\nrules: []").unwrap();
@@ -122,7 +122,7 @@ fn load_attaches_path() {
 
 #[test]
 fn missing_file_is_reported() {
-    let e = Config::load("/nonexistent/ezlint.yaml").unwrap_err();
+    let e = Config::load("/nonexistent/declint.yaml").unwrap_err();
     assert!(e.to_string().contains("cannot read config file"), "{e}");
 }
 

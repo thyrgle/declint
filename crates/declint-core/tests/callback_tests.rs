@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use ezlint_core::{Callbacks, CallbackRef, Config, Decision, Linter, MatchCallback, MatchContext, Severity};
+use declint_core::{Callbacks, CallbackRef, Config, Decision, Linter, MatchCallback, MatchContext, Severity};
 
 struct Fixed(Decision);
 
@@ -111,7 +111,7 @@ fn violate_decision_overrides_message_and_severity() {
 
     let text = "x\nTODOhere x";
     let v = linter.lint_all_in(
-        ezlint_core::DocInfo { path: "a.txt", language: "text" },
+        declint_core::DocInfo { path: "a.txt", language: "text" },
         text,
     );
     assert_eq!(v.len(), 1);
@@ -193,7 +193,7 @@ scopes:
     let config = Config::from_str(yaml).unwrap();
     let linter = Linter::new(config, &callbacks).unwrap();
     let v = linter.lint_all_in(
-        ezlint_core::DocInfo { path: "p.sh", language: "sh" },
+        declint_core::DocInfo { path: "p.sh", language: "sh" },
         "X\nTODO now\n",
     );
     assert_eq!(v.len(), 1);

@@ -4,7 +4,7 @@
 //! Core is engine-free: rules carry a [`CallbackRef`] (a name, an inline
 //! source, or a file path), hosts register [`MatchCallback`]
 //! implementations by name/ref, and [`Linter::build`] wires them up.
-//! The `ezlint-lua` crate compiles Lua callbacks; Rust embedders
+//! The `declint-lua` crate compiles Lua callbacks; Rust embedders
 //! implement [`MatchCallback`] directly.
 
 use std::collections::HashMap;
@@ -108,7 +108,7 @@ impl Callbacks {
     }
 
     /// Registers the implementation for an inline/file reference — the
-    /// loader's entry point (e.g. `ezlint-lua`).
+    /// loader's entry point (e.g. `declint-lua`).
     pub fn register_ref(&mut self, reference: &CallbackRef, callback: Arc<dyn MatchCallback>) {
         self.map.insert(key_of(reference), callback);
     }

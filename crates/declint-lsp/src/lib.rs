@@ -1,4 +1,4 @@
-//! The ezlint language server: YAML lint rules in, LSP diagnostics out.
+//! The declint language server: YAML lint rules in, LSP diagnostics out.
 //!
 //! Builds on [`increparse_lsp`]'s `serve()` skeleton — document
 //! bookkeeping, incremental change translation, position encoding, and
@@ -8,24 +8,24 @@
 //! matched by span + context on re-parse, an edit inside one region
 //! re-lints only that region — the increparse payoff.
 //!
-//! A [`ConfigSet`] may hold several configs (e.g. a `.ezlint/` directory
+//! A [`ConfigSet`] may hold several configs (e.g. a `.declint/` directory
 //! with one file per language); each document only receives diagnostics
 //! from the configs whose `languages` match its `languageId`.
 //!
 //! This crate's own job is turning [`Violation`]s into `Diagnostic`s with
-//! `source: "ezlint"` and `code: <rule-id>` (so editors can filter and
+//! `source: "declint"` and `code: <rule-id>` (so editors can filter and
 //! link per rule).
 //!
 //! # Examples
 //!
 //! ```
-//! use ezlint_core::{Callbacks, ConfigSet};
+//! use declint_core::{Callbacks, ConfigSet};
 //! # fn get_config_dir() -> String { String::new() }
 //! # fn not_run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! let set = ConfigSet::discover(std::path::Path::new(&get_config_dir()))?;
 //! let mut callbacks = Callbacks::new();
-//! ezlint_lua::attach(&set, &mut callbacks)?;
-//! ezlint_lsp::serve(set, &callbacks)?;
+//! declint_lua::attach(&set, &mut callbacks)?;
+//! declint_lsp::serve(set, &callbacks)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -35,7 +35,7 @@
 
 use std::error::Error;
 
-use ezlint_core::{
+use declint_core::{
     segment_all, Callbacks, ConfigError, ConfigSet, DocInfo, Linter, Scope, Severity, Violation,
 };
 use increparse::{Engine, Outcome, Pass, Span};
@@ -117,7 +117,7 @@ impl Pass for Accept {
     }
 }
 
-/// Maps an ezlint severity to an LSP diagnostic severity.
+/// Maps an declint severity to an LSP diagnostic severity.
 pub fn lsp_severity(severity: Severity) -> DiagnosticSeverity {
     match severity {
         Severity::Error => DiagnosticSeverity::ERROR,
@@ -135,7 +135,7 @@ pub fn diagnostic(doc: &Document<Ctx>, violation: &Violation) -> Diagnostic {
         severity: Some(lsp_severity(violation.severity)),
         code: Some(NumberOrString::String(violation.rule_id.clone())),
         code_description: None,
-        source: Some("ezlint".into()),
+        source: Some("declint".into()),
         message: violation.message.clone(),
         related_information: None,
         tags: None,
@@ -145,13 +145,13 @@ pub fn diagnostic(doc: &Document<Ctx>, violation: &Violation) -> Diagnostic {
 
 /// Collects the scope regions currently in the tree as
 /// `(scope-table index, byte range)` pairs.
-fn tree_segments(doc: &Document<Ctx>) -> Vec<(usize, ezlint_core::Span)> {
+fn tree_segments(doc: &Document<Ctx>) -> Vec<(usize, declint_core::Span)> {
     let tree = doc.session().tree();
     tree.nodes()
         .filter_map(|id| match tree.ctx(id) {
             Ctx::Scoped { scope } => {
                 let span = tree.span(id);
-                Some((*scope, ezlint_core::Span::new(span.start, span.end)))
+                Some((*scope, declint_core::Span::new(span.start, span.end)))
             }
             Ctx::Root => None,
         })
@@ -159,13 +159,13 @@ fn tree_segments(doc: &Document<Ctx>) -> Vec<(usize, ezlint_core::Span)> {
 }
 
 /// Builds a `SimpleLanguage` that segments documents and publishes the
-/// config set's violations as diagnostics — for embedding ezlint into
+/// config set's violations as diagnostics — for embedding declint into
 /// your own server.
 ///
 /// Only configs whose `languages` match the document's `languageId`
 /// contribute diagnostics. Rules referencing callbacks that are not in
 /// `callbacks` make this fail — Lua callbacks come from
-/// `ezlint_lua::attach`.
+/// `declint_lua::attach`.
 pub fn language(
     set: ConfigSet,
     callbacks: &Callbacks,
@@ -195,7 +195,7 @@ pub fn language(
         };
         // Group the tree's regions per config, remapping global scope
         // indices to each config's local ones.
-        let mut per_config: Vec<Vec<(usize, ezlint_core::Span)>> =
+        let mut per_config: Vec<Vec<(usize, declint_core::Span)>> =
             vec![Vec::new(); linters.len()];
         for (global, span) in tree_segments(doc) {
             if let Some(&(config, local)) = owners.get(global) {
@@ -220,7 +220,7 @@ pub fn language(
     }))
 }
 
-/// Runs an ezlint language server on stdio until the client sends
+/// Runs an declint language server on stdio until the client sends
 /// `shutdown` + `exit`.
 pub fn serve(
     set: ConfigSet,
@@ -233,7 +233,7 @@ pub fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ezlint_core::{Callbacks, Config};
+    use declint_core::{Callbacks, Config};
     use increparse::{CancelToken, SerialExecutor};
     use increparse_lsp::PositionEncoding;
     use lsp_types::Uri;
@@ -268,11 +268,11 @@ scopes:
     fn set_from(yamls: &[&str]) -> ConfigSet {
         static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!("ezlint-lsp-{}-{n}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("declint-lsp-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join(".ezlint")).unwrap();
+        std::fs::create_dir_all(dir.join(".declint")).unwrap();
         for (i, yaml) in yamls.iter().enumerate() {
-            std::fs::write(dir.join(".ezlint").join(format!("c{i}.yaml")), yaml).unwrap();
+            std::fs::write(dir.join(".declint").join(format!("c{i}.yaml")), yaml).unwrap();
         }
         ConfigSet::discover(&dir).unwrap()
     }
@@ -403,7 +403,7 @@ rules:
 ";
         let set = set_from(&[yaml]);
         let mut callbacks = Callbacks::new();
-        ezlint_lua::attach(&set, &mut callbacks).unwrap();
+        declint_lua::attach(&set, &mut callbacks).unwrap();
         let lang = language(set, &callbacks).unwrap();
 
         // A quiet TODO is allowed; a loud one becomes an error.

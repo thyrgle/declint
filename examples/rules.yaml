@@ -1,8 +1,8 @@
-# An example ezlint rule set — language-agnostic cleanliness checks.
+# An example declint rule set — language-agnostic cleanliness checks.
 #
-# Copy it next to your files as `ezlint.yaml`, then:
-#   ezlint serve ezlint.yaml          # in your editor (LSP over stdio)
-#   ezlint check --config ezlint.yaml src/**   # in CI
+# Copy it next to your files as `declint.yaml`, then:
+#   declint serve declint.yaml          # in your editor (LSP over stdio)
+#   declint check --config declint.yaml src/**   # in CI
 
 version: 1
 rules:

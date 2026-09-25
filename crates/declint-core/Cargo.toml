@@ -1,8 +1,8 @@
 [package]
-name = "ezlint-core"
+name = "declint-core"
 version = "0.4.0"
 edition = "2021"
-description = "Config and regex linting engine for ezlint: YAML rule files, message templates, violations. No LSP dependencies."
+description = "Config and regex linting engine for declint: YAML rule files, message templates, violations. No LSP dependencies."
 license = "MIT OR Apache-2.0"
 keywords = ["lint", "linter", "regex", "config"]
 categories = ["development-tools", "parsing"]

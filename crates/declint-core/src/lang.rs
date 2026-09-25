@@ -2,7 +2,7 @@
 //!
 //! The names are common Neovim filetypes, which is what a Neovim LSP
 //! client sends as `languageId` — the same vocabulary as a config's
-//! `languages` key. `ezlint check --language` always wins over this
+//! `languages` key. `declint check --language` always wins over this
 //! table; files whose extension is unknown get no language, and only
 //! configs without a `languages` key apply to them.
 

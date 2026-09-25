@@ -1,5 +1,5 @@
-//! Loading a whole configuration *site*: a hidden file (`.ezlint.yaml`)
-//! or a hidden directory of per-language configs (`.ezlint/*.yaml`),
+//! Loading a whole configuration *site*: a hidden file (`.declint.yaml`)
+//! or a hidden directory of per-language configs (`.declint/*.yaml`),
 //! found by walking up from a starting directory.
 
 use std::path::{Path, PathBuf};
@@ -7,15 +7,15 @@ use std::path::{Path, PathBuf};
 use crate::config::{Config, ConfigError};
 use crate::config::Scope;
 
-/// The hidden config file: `.ezlint.yaml`.
-pub const CONFIG_FILE: &str = ".ezlint.yaml";
+/// The hidden config file: `.declint.yaml`.
+pub const CONFIG_FILE: &str = ".declint.yaml";
 
-/// The hidden config directory: `.ezlint/` (every `*.yaml` inside is a
+/// The hidden config directory: `.declint/` (every `*.yaml` inside is a
 /// config).
-pub const CONFIG_DIR: &str = ".ezlint";
+pub const CONFIG_DIR: &str = ".declint";
 
 /// The legacy, non-hidden config file, still accepted last.
-pub const LEGACY_CONFIG_FILE: &str = "ezlint.yaml";
+pub const LEGACY_CONFIG_FILE: &str = "declint.yaml";
 
 /// One config file loaded as part of a [`ConfigSet`].
 #[derive(Debug, Clone)]
@@ -26,8 +26,8 @@ pub struct NamedConfig {
     pub config: Config,
 }
 
-/// A set of config files loaded together — the whole `.ezlint.yaml`, or
-/// everything in a `.ezlint/` directory.
+/// A set of config files loaded together — the whole `.declint.yaml`, or
+/// everything in a `.declint/` directory.
 ///
 /// Ids must be unique *within* one file, but different files may reuse
 /// them: only the configs whose `languages` match a document ever apply
@@ -117,7 +117,7 @@ impl ConfigSet {
             }
         }
         Err(ConfigError::new(format!(
-            "no ezlint config found (looked for {CONFIG_FILE}, {CONFIG_DIR}/, \
+            "no declint config found (looked for {CONFIG_FILE}, {CONFIG_DIR}/, \
              {LEGACY_CONFIG_FILE} in `{}` and its parents)",
             start.display()
         )))

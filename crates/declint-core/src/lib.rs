@@ -1,6 +1,6 @@
-//! Config and linting engine for [`ezlint`] — no LSP dependencies.
+//! Config and linting engine for [`declint`] — no LSP dependencies.
 //!
-//! An ezlint configuration is a YAML file of regex rules:
+//! An declint configuration is a YAML file of regex rules:
 //!
 //! ```yaml
 //! version: 1
@@ -14,10 +14,10 @@
 //! Load it, lint text, get violations:
 //!
 //! ```
-//! use ezlint_core::{Config, Linter};
+//! use declint_core::{Config, Linter};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use ezlint_core::{Callbacks, Config, Linter};
+//! use declint_core::{Callbacks, Config, Linter};
 //!
 //! let config = Config::from_str(
 //!     "version: 1\nrules:\n  - id: no-tabs\n    pattern: '\\t+'\n    message: \"Use \
@@ -55,7 +55,7 @@
 //!         severity: error
 //! ```
 //!
-//! [`ezlint`]: https://crates.io/crates/ezlint
+//! [`declint`]: https://crates.io/crates/declint
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -78,8 +78,8 @@ pub use template::Template;
 
 /// How serious a violation is.
 ///
-/// Rendered one-to-one as an LSP diagnostic severity by `ezlint-lsp`, and
-/// printed verbatim by `ezlint check`.
+/// Rendered one-to-one as an LSP diagnostic severity by `declint-lsp`, and
+/// printed verbatim by `declint check`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Severity {
     /// A definite problem.

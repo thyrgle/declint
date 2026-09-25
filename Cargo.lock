@@ -167,6 +167,44 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
+name = "declint"
+version = "0.4.0"
+dependencies = [
+ "clap",
+ "declint-core",
+ "declint-lsp",
+ "declint-lua",
+ "serde_json",
+]
+
+[[package]]
+name = "declint-core"
+version = "0.4.0"
+dependencies = [
+ "regex",
+ "serde_yaml",
+]
+
+[[package]]
+name = "declint-lsp"
+version = "0.4.0"
+dependencies = [
+ "declint-core",
+ "declint-lua",
+ "increparse",
+ "increparse-lsp",
+ "lsp-types",
+]
+
+[[package]]
+name = "declint-lua"
+version = "0.4.0"
+dependencies = [
+ "declint-core",
+ "mlua",
+]
+
+[[package]]
 name = "either"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -177,44 +215,6 @@ name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
-
-[[package]]
-name = "ezlint"
-version = "0.4.0"
-dependencies = [
- "clap",
- "ezlint-core",
- "ezlint-lsp",
- "ezlint-lua",
- "serde_json",
-]
-
-[[package]]
-name = "ezlint-core"
-version = "0.4.0"
-dependencies = [
- "regex",
- "serde_yaml",
-]
-
-[[package]]
-name = "ezlint-lsp"
-version = "0.4.0"
-dependencies = [
- "ezlint-core",
- "ezlint-lua",
- "increparse",
- "increparse-lsp",
- "lsp-types",
-]
-
-[[package]]
-name = "ezlint-lua"
-version = "0.4.0"
-dependencies = [
- "ezlint-core",
- "mlua",
-]
 
 [[package]]
 name = "find-msvc-tools"

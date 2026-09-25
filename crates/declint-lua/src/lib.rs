@@ -1,4 +1,4 @@
-//! Lua match callbacks for ezlint.
+//! Lua match callbacks for declint.
 //!
 //! A rule's `callback:` value can be an **inline Lua snippet** (a block
 //! scalar) or a **file path** (`checks/foo.lua`, relative to the config
@@ -36,15 +36,15 @@
 //! # Examples
 //!
 //! ```
-//! use ezlint_core::{CallbackRef, Callbacks, ConfigSet};
+//! use declint_core::{CallbackRef, Callbacks, ConfigSet};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! # let dir = std::env::temp_dir().join("ezlint-lua-doc");
+//! # let dir = std::env::temp_dir().join("declint-lua-doc");
 //! # std::fs::create_dir_all(&dir)?;
-//! #     std::fs::write(dir.join(".ezlint.yaml"),
+//! #     std::fs::write(dir.join(".declint.yaml"),
 //! #     "version: 1\nrules:\n  - id: r\n    pattern: 'x'\n    callback: |\n      return function(c) return { message = \"seen \" .. c.match } end\n")?;
 //! let set = ConfigSet::discover(&dir)?;
 //! let mut callbacks = Callbacks::new();
-//! ezlint_lua::attach(&set, &mut callbacks)?;
+//! declint_lua::attach(&set, &mut callbacks)?;
 //! assert!(!callbacks.is_empty());
 //! # std::fs::remove_dir_all(&dir)?;
 //! # Ok(())
@@ -56,7 +56,7 @@
 
 use std::sync::Arc;
 
-use ezlint_core::{
+use declint_core::{
     CallbackRef, Callbacks, ConfigError, ConfigSet, Decision, MatchCallback, MatchContext, Severity,
 };
 use mlua::{Function, Lua, Value};
@@ -157,8 +157,8 @@ pub fn attach(set: &ConfigSet, callbacks: &mut Callbacks) -> Result<(), ConfigEr
             .map(std::path::Path::to_path_buf)
             .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-        let mut visit = |rules: &[ezlint_core::Rule],
-                         label: &dyn Fn(&ezlint_core::Rule) -> String|
+        let mut visit = |rules: &[declint_core::Rule],
+                         label: &dyn Fn(&declint_core::Rule) -> String|
          -> Result<(), ConfigError> {
             for rule in rules {
                 let Some(reference) = &rule.callback else {
@@ -191,10 +191,10 @@ pub fn attach(set: &ConfigSet, callbacks: &mut Callbacks) -> Result<(), ConfigEr
             Ok(())
         };
 
-        let global_label = |rule: &ezlint_core::Rule| format!("{}: rule '{}'", shown(&named.path), rule.id);
+        let global_label = |rule: &declint_core::Rule| format!("{}: rule '{}'", shown(&named.path), rule.id);
         visit(&named.config.rules, &global_label)?;
         for scope in &named.config.scopes {
-            let scope_label = |rule: &ezlint_core::Rule| {
+            let scope_label = |rule: &declint_core::Rule| {
                 format!(
                     "{}: scope '{}' rule '{}'",
                     shown(&named.path),
@@ -239,15 +239,15 @@ fn compile(lua: &Lua, source: String) -> Result<Function, mlua::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ezlint_core::{Config, Linter};
+    use declint_core::{Config, Linter};
 
     fn linter_with(yaml: &str) -> Linter {
         static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!("ezlint-lua-{}-{n}-t", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("declint-lua-{}-{n}-t", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(".ezlint.yaml"), yaml).unwrap();
+        std::fs::write(dir.join(".declint.yaml"), yaml).unwrap();
         let set = ConfigSet::discover(&dir).unwrap();
         let mut callbacks = Callbacks::new();
         attach(&set, &mut callbacks).unwrap();
@@ -264,7 +264,7 @@ mod tests {
             "    callback: |\n      return function(c)\n        return { severity = \"hint\", message = \"seen \" .. c.match .. \" at \" .. c.line .. \":\" .. c.col }\n      end\n",
         ));
         let v = linter.lint_in(
-            ezlint_core::DocInfo { path: "f.txt", language: "text" },
+            declint_core::DocInfo { path: "f.txt", language: "text" },
             "ab\nTODOhere",
         );
         assert_eq!(v.len(), 1);
@@ -315,7 +315,7 @@ rules:
             "    callback: |\n      return function(c)\n        return { message = c.rule .. \"/\" .. c.language .. \"/\" .. c.path .. \"/\" .. c.match .. \"/\" .. c.start .. \"-\" .. c.finish }\n      end\n",
         ));
         let v = linter.lint_in(
-            ezlint_core::DocInfo { path: "p.sh", language: "sh" },
+            declint_core::DocInfo { path: "p.sh", language: "sh" },
             "go TODO go",
         );
         assert_eq!(v[0].message, "probe/sh/p.sh/TODO/3-7");
@@ -364,11 +364,11 @@ rules:
 
     #[test]
     fn syntax_error_is_a_config_error() {
-        let dir = std::env::temp_dir().join(format!("ezlint-lua-{}-syn", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("declint-lua-{}-syn", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
-            dir.join(".ezlint.yaml"),
+            dir.join(".declint.yaml"),
             "version: 1\nrules:\n  - id: probe\n    pattern: 'x'\n    callback: 'returnnil junk'\n",
         )
         .unwrap();
@@ -382,11 +382,11 @@ rules:
 
     #[test]
     fn file_callback_resolves_relative_to_config() {
-        let dir = std::env::temp_dir().join(format!("ezlint-lua-{}-file", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("declint-lua-{}-file", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("checks")).unwrap();
         std::fs::write(
-            dir.join(".ezlint.yaml"),
+            dir.join(".declint.yaml"),
             "version: 1\nrules:\n  - id: probe\n    pattern: 'TODO'\n    callback: checks/cb.lua\n",
         )
         .unwrap();
@@ -410,10 +410,10 @@ rules:
             "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n",
         )
         .unwrap();
-        let dir = std::env::temp_dir().join(format!("ezlint-lua-{}-plain", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("declint-lua-{}-plain", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(".ezlint.yaml"), "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n").unwrap();
+        std::fs::write(dir.join(".declint.yaml"), "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n").unwrap();
         let set = ConfigSet::discover(&dir).unwrap();
         let mut callbacks = Callbacks::new();
         attach(&set, &mut callbacks).unwrap();

@@ -1,4 +1,4 @@
-//! End-to-end smoke test: spawns the `ezlint` binary in LSP mode and drives
+//! End-to-end smoke test: spawns the `declint` binary in LSP mode and drives
 //! a real session over stdio — initialize, didOpen (with a tab), incremental
 //! didChange (fixing it), shutdown.
 
@@ -42,13 +42,13 @@ scopes:
 const SOURCE: &str = "def x = 1;\t# note\n# quiet TODO\n# loud TODO!!!\n```sh\nsudo ls -la /\n```\n";
 
 fn spawn_server(config_path: &str) -> (Child, ChildStdin, Receiver<String>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_ezlint"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_declint"))
         .args(["serve", config_path])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .expect("failed to spawn ezlint");
+        .expect("failed to spawn declint");
 
     let stdin = child.stdin.take().expect("stdin");
     let stdout = child.stdout.take().expect("stdout");
@@ -135,13 +135,13 @@ fn wait_for_diagnostics(rx: &Receiver<String>, version: Option<i64>) -> serde_js
 }
 
 fn write_config() -> String {
-    let path = std::env::temp_dir().join(format!("ezlint-smoke-{}.yaml", std::process::id()));
+    let path = std::env::temp_dir().join(format!("declint-smoke-{}.yaml", std::process::id()));
     std::fs::write(&path, CONFIG).expect("write config");
     path.to_string_lossy().into_owned()
 }
 
 #[test]
-fn ezlint_server_smoke() {
+fn declint_server_smoke() {
     let config_path = write_config();
     let (mut child, mut stdin, rx) = spawn_server(&config_path);
 
@@ -186,7 +186,7 @@ fn ezlint_server_smoke() {
         .find(|d| d["code"] == "no-tabs")
         .expect("no-tabs diagnostic");
     assert_eq!(tab["severity"], 2, "warning");
-    assert_eq!(tab["source"], "ezlint");
+    assert_eq!(tab["source"], "declint");
     assert!(
         tab["message"].to_string().contains("Use spaces"),
         "{}",
