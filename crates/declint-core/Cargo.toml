@@ -1,9 +1,11 @@
 [package]
 name = "declint-core"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 description = "Config and regex linting engine for declint: YAML rule files, message templates, violations. No LSP dependencies."
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/your-org/declint"
+readme = "../../README.md"
 keywords = ["lint", "linter", "regex", "config"]
 categories = ["development-tools", "parsing"]
 

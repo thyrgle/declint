@@ -263,11 +263,60 @@ config.
    names (`md` → `markdown`, `py` → `python`, `sh` → `sh`, ...)
 3. Unknown → only configs **without** a `languages` key apply
 
+## Continuous integration
+
+`declint check` is CI-shaped: `file:line:col: severity[id]: message`
+output, exit 0 clean / 1 violations / 2 broken setup. Pass
+`--format github` and every violation becomes a GitHub Actions workflow
+command — inline annotations right on the pull request:
+
+```console
+$ declint check --format github .
+::error file=app.ini,line=10,col=1,endLine=10::[declint/port-range] port must be 1-65535, found 99999
+```
+
+Directory arguments are walked recursively (`.gitignore` is respected,
+hidden paths and non-UTF-8 files skipped), so the whole incantation for
+a repository is `declint check .` with the config discovery you already
+use locally.
+
+**As a workflow step** (annotates the PR, fails the job on violations):
+
+```yaml
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: your-org/declint@v0        # the composite action in this repo
+        with:
+          path: .
+          declint-version: "0.6.0"
+```
+
+**Or by hand**, without the action:
+
+```yaml
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo install declint --locked
+      - run: declint check . --format github
+```
+
+The config comes from the repository being linted — the same
+`.declint.yaml` / `.declint/` your editors use. Lua callbacks and parser
+rules run sandboxed with instruction budgets, so a looping rule fails a
+diagnostic instead of hanging the job.
+
 ### Regex flavor
 
 Patterns use the [`regex`](https://docs.rs/regex) crate: linear-time, no
 catastrophic backtracking, named groups via `(?<name>...)`. Lookaround and
-backreferences are not supported in v1.
+backreferences are not available in regex rules — for matching beyond
+that, use a [parser rule](#parser-rules).
 
 ## Workspace layout
 

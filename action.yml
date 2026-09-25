@@ -1,0 +1,41 @@
+name: "declint"
+description: "Run declint checks and annotate the pull request"
+branding:
+  icon: "check-circle"
+  color: "green"
+
+inputs:
+  path:
+    description: "Files or directories to check (directories are walked recursively)"
+    required: false
+    default: "."
+  config:
+    description: "Explicit config file or directory; omitted = discover (.declint.yaml, .declint/, declint.yaml)"
+    required: false
+    default: ""
+  language:
+    description: "Override the language id instead of inferring from extensions"
+    required: false
+    default: ""
+  declint-version:
+    description: "declint version to install from crates.io"
+    required: false
+    default: "0.6.0"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install declint
+      shell: bash
+      run: cargo install declint@${{ inputs.declint-version }} --locked
+    - name: Check
+      shell: bash
+      run: |
+        ARGS=(check --format github)
+        if [ -n "${{ inputs.config }}" ]; then
+          ARGS+=(--config "${{ inputs.config }}")
+        fi
+        if [ -n "${{ inputs.language }}" ]; then
+          ARGS+=(--language "${{ inputs.language }}")
+        fi
+        declint "${ARGS[@]}" ${{ inputs.path }}

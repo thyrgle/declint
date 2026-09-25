@@ -151,3 +151,100 @@ rules:
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn github_format_emits_workflow_commands() {
+    let dir = std::env::temp_dir().join(format!("ezlint-gh-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    write(
+        &dir.join(".declint.yaml"),
+        "version: 1\nrules:\n  - id: no-sudo\n    pattern: '\\bsudo\\b'\n    message: 'no sudo: 100% bad'\n    severity: error\n",
+    );
+    write(&dir.join("a.ini"), "run sudo here\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["check", "--format", "github", "a.ini"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(stdout.lines().count(), 1, "{stdout}");
+    assert!(
+        stdout.starts_with("::error file=a.ini,line=1,col=5,endLine=1::[declint/no-sudo] no sudo: 100%25 bad"),
+        "{stdout}"
+    );
+
+    // A clean file in the same setup: no annotations, exit 0.
+    write(&dir.join("clean.ini"), "all good\n");
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["check", "--format", "github", "clean.ini"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn directory_arguments_are_walked() {
+    let dir = std::env::temp_dir().join(format!("ezlint-walk-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    write(
+        &dir.join(".declint.yaml"),
+        "version: 1\nrules:\n  - id: no-sudo\n    pattern: '\\bsudo\\b'\n    message: 'no sudo'\n    severity: error\n",
+    );
+    write(&dir.join("top.ini"), "sudo\n");
+    write(&dir.join("nested").join("deep.ini"), "sudo\n");
+    // Hidden directories are skipped...
+    write(&dir.join(".hidden").join("h.ini"), "sudo\n");
+    // ...and so are files the walker's gitignore logic excludes. The
+    // walker applies .gitignore inside git repositories (require_git,
+    // like git itself), so the fixture needs a .git directory.
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    write(&dir.join(".gitignore"), "skipped.ini\n");
+    write(&dir.join("skipped.ini"), "sudo\n");
+    // Non-UTF-8 files are skipped silently, not a hard error.
+    std::fs::write(dir.join("bin.ini"), b"sudo \xff\xfe\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["check", "."])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert_eq!(output.status.code(), Some(1), "{stdout}");
+    assert_eq!(stdout.lines().count(), 2, "{stdout}");
+    assert!(stdout.contains("top.ini:1:1:"), "{stdout}");
+    assert!(stdout.contains("nested/deep.ini:1:1:"), "{stdout}");
+    assert!(!stdout.contains("skipped.ini"), "{stdout}");
+    assert!(!stdout.contains("h.ini"), "{stdout}");
+    assert!(!stdout.contains("bin.ini"), "{stdout}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn explicit_missing_file_still_fails_hard() {
+    let dir = std::env::temp_dir().join(format!("ezlint-miss-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    write(
+        &dir.join(".declint.yaml"),
+        "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n",
+    );
+    let (_stdout, stderr, code) = {
+        let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+            .args(["check", "does-not-exist.ini"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        (
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+            output.status.code(),
+        )
+    };
+    assert_eq!(code, Some(2), "{stderr}");
+    assert!(stderr.contains("cannot read"), "{stderr}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
