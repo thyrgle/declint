@@ -202,3 +202,34 @@ fn global_rules_stay_valid_with_scopes_present() {
     assert_eq!(config.rules.len(), 1);
     assert_eq!(config.scopes.len(), 1);
 }
+
+#[test]
+fn languages_key_parses_and_dedupes() {
+    let config = Config::from_str(
+        "version: 1\nlanguages: [markdown, sh, markdown]\nrules:\n  - id: r\n    pattern: x\n    message: m\n",
+    )
+    .unwrap();
+    assert_eq!(config.languages, ["markdown", "sh"]);
+    assert!(config.matches_language("markdown"));
+    assert!(config.matches_language("sh"));
+    assert!(!config.matches_language("python"));
+}
+
+#[test]
+fn no_languages_key_matches_everything() {
+    let config = Config::from_str(
+        "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n",
+    )
+    .unwrap();
+    assert!(config.languages.is_empty());
+    assert!(config.matches_language(""));
+    assert!(config.matches_language("anything"));
+}
+
+#[test]
+fn bad_languages_are_rejected() {
+    let e = err("version: 1\nlanguages: markdown\nrules:\n  - id: r\n    pattern: x\n    message: m\n");
+    assert!(e.contains("`languages` must be a list"), "{e}");
+    let e = err("version: 1\nlanguages: [markdown, '']\nrules:\n  - id: r\n    pattern: x\n    message: m\n");
+    assert!(e.contains("non-empty strings"), "{e}");
+}

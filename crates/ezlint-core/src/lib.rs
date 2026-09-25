@@ -59,11 +59,15 @@
 #![deny(missing_docs)]
 
 mod config;
+mod config_set;
+mod lang;
 mod linter;
 mod scopes;
 mod template;
 
 pub use config::{Config, ConfigError, Rule, Scope, SUPPORTED_VERSION};
+pub use config_set::{ConfigSet, NamedConfig, ScopeEntry, CONFIG_DIR, CONFIG_FILE, LEGACY_CONFIG_FILE};
+pub use lang::language_from_extension;
 pub use linter::{line_col, Linter, Span, Violation};
 pub use scopes::{segment, segment_all};
 pub use template::Template;

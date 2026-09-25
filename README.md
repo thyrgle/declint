@@ -26,26 +26,48 @@ ezlint check src/**
 ezlint serve           # reads ./ezlint.yaml
 ```
 
-### Editor setup
+### Neovim setup
 
-Any LSP client that lets you launch a custom stdio server works.
-
-**Neovim** (with nvim-lspconfig):
+Any LSP client that launches a custom stdio server works. **Neovim**
+(with nvim-lspconfig):
 
 ```lua
 require('lspconfig.configs').ezlint = {
   default_config = {
-    cmd = { 'ezlint', 'serve' },
-    filetypes = { 'text', 'markdown', 'ini', 'conf' },  -- whatever you lint
+    cmd = { 'ezlint', 'serve' },                -- discovers .ezlint.yaml / .ezlint/ itself
+    filetypes = { 'markdown', 'sh' },           -- match your configs' languages
     root_dir = vim.fn.getcwd,
   },
 }
 require('lspconfig').ezlint.setup({})
 ```
 
-**VS Code**: point a generic LSP client extension (e.g. any
-"custom language server" extension) at `ezlint serve` with the filetypes you
-want.
+The `filetypes` list should match the `languages:` keys in your configs —
+Neovim sends the filetype as the LSP `languageId`, and ezlint only
+publishes diagnostics from configs whose `languages` match it. A file of
+any other filetype gets a clean (empty) diagnostic publish.
+
+### VS Code
+
+Point a generic LSP client extension at `ezlint serve` with the filetypes
+you want.
+
+## Config discovery
+
+With no explicit path, both `ezlint serve` and `ezlint check` look for a
+**config site** starting at the current directory and walking up through
+parents. At each directory the search order is:
+
+1. `.ezlint.yaml` — a single hidden config file
+2. `.ezlint/` — a hidden directory; **every `*.yaml` inside is a config**
+   (a natural layout for per-language rule files: `markdown.yaml`,
+   `sh.yaml`, ...)
+3. `ezlint.yaml` — the legacy, non-hidden name, still accepted
+
+The first hit wins. Ids must be unique *within* one config file, but
+different files in a `.ezlint/` directory may reuse them — only one
+language's configs apply to any given document, so codes stay
+unambiguous.
 
 ## Config reference
 
@@ -54,6 +76,8 @@ explicit path too).
 
 ```yaml
 version: 1                # required; this ezlint understands version 1
+languages: [markdown, sh] # optional; editor language ids this config applies
+                          # to (exact match; missing = all languages)
 rules:                    # file-global rules; optional if `scopes` is present
   - id: rule-name         # required; unique; becomes the diagnostic's code
     pattern: '\t+'        # required; Rust `regex` crate syntax (no lookaround)
@@ -115,6 +139,15 @@ scopes:
 See [`examples/scoped-rules.yaml`](examples/scoped-rules.yaml) for a full
 config.
 
+### CLI language handling
+
+`ezlint check` decides each file's language in this order:
+
+1. `--language <id>` — always wins (e.g. `--language markdown`)
+2. The file's extension, via a built-in table of common Neovim filetype
+   names (`md` → `markdown`, `py` → `python`, `sh` → `sh`, ...)
+3. Unknown → only configs **without** a `languages` key apply
+
 ### Regex flavor
 
 Patterns use the [`regex`](https://docs.rs/regex) crate: linear-time, no
@@ -150,9 +183,9 @@ filter, style, and (later) suppress per rule.
 - v2: nested scopes (a scope inside a scope), rule callbacks (Rust
   snippets with a compile cache, and Lua), `fix:` templates → LSP
   CodeActions, inline `# ezlint:disable=<id>` comments, per-rule file
-  globs, config discovery up the directory tree.
+  globs.
 
 ## Status
 
-0.2.0 — regex rules, global and scoped; the schema is versioned to keep
-future configs compatible.
+0.3.0 — hidden configs with directory discovery, per-language configs,
+scoped rules; the schema is versioned to keep future configs compatible.

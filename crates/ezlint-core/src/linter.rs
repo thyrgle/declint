@@ -57,6 +57,25 @@ pub struct Violation {
     pub message: String,
 }
 
+impl PartialOrd for Violation {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Ordered by position, then span end, then rule id — the deterministic
+/// output order used by every lint entry point.
+impl Ord for Violation {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (self.span.start, self.span.end, &self.rule_id, &self.message).cmp(&(
+            other.span.start,
+            other.span.end,
+            &other.rule_id,
+            &other.message,
+        ))
+    }
+}
+
 /// A compiled, ready-to-run rule set.
 #[derive(Debug, Clone)]
 pub struct Linter {
@@ -158,14 +177,7 @@ fn collect_rule(rule: &Rule, text: &str, offset: usize, out: &mut Vec<Violation>
 }
 
 fn sort_violations(violations: &mut [Violation]) {
-    violations.sort_by(|a, b| {
-        (a.span.start, a.span.end, &a.rule_id, &a.message).cmp(&(
-            b.span.start,
-            b.span.end,
-            &b.rule_id,
-            &b.message,
-        ))
-    });
+    violations.sort();
 }
 
 /// Converts a byte offset to a 1-based `(line, column)` pair for

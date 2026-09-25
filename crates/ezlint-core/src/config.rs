@@ -28,7 +28,7 @@ pub struct ConfigError {
 }
 
 impl ConfigError {
-    fn new(message: impl Into<String>) -> Self {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
             line: None,
@@ -97,10 +97,22 @@ pub struct Config {
     /// The config's declared schema version (always
     /// [`SUPPORTED_VERSION`]).
     pub version: u64,
+    /// The editor language ids this config applies to (exact match
+    /// against the client's `languageId`; in Neovim, the filetype).
+    /// Empty = every language.
+    pub languages: Vec<String>,
     /// The validated global rules, in file order.
     pub rules: Vec<Rule>,
     /// The validated scopes, in file order.
     pub scopes: Vec<Scope>,
+}
+
+impl Config {
+    /// Whether this config applies to documents with language id `id`.
+    /// Configs without a `languages` key apply to everything.
+    pub fn matches_language(&self, id: &str) -> bool {
+        self.languages.is_empty() || self.languages.iter().any(|l| l == id)
+    }
 }
 
 /// One validated lint rule.
@@ -195,6 +207,30 @@ impl Config {
             return Err(ConfigError::new("config must define `rules` or `scopes`"));
         }
 
+        let languages = match map.get(Value::from("languages")) {
+            None => Vec::new(),
+            Some(value) => {
+                let Value::Sequence(entries) = value else {
+                    return Err(ConfigError::new(
+                        "`languages` must be a list of language ids (e.g. `[markdown, sh]`)",
+                    ));
+                };
+                let mut seen = HashSet::new();
+                let mut languages = Vec::new();
+                for entry in entries {
+                    let Some(language) = entry.as_str().filter(|s| !s.is_empty()) else {
+                        return Err(ConfigError::new(
+                            "`languages` entries must be non-empty strings",
+                        ));
+                    };
+                    if seen.insert(language.to_string()) {
+                        languages.push(language.to_string());
+                    }
+                }
+                languages
+            }
+        };
+
         let mut seen_ids = HashSet::new();
 
         let rules = match rules_value {
@@ -239,6 +275,7 @@ impl Config {
 
         Ok(Self {
             version,
+            languages,
             rules,
             scopes,
         })

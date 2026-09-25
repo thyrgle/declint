@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 const CONFIG: &str = "\
 version: 1
+languages: [plaintext]
 rules:
   - id: no-tabs
     pattern: '\\t+'
@@ -213,6 +214,29 @@ fn ezlint_server_smoke() {
     let diags = diags.as_array().unwrap();
     assert_eq!(diags.len(), 1, "only the scoped sudo survives");
     assert_eq!(diags[0]["code"], "no-sudo");
+
+    // A document whose languageId does not match the config's
+    // `languages` gets an empty publish, even with violations present.
+    send(
+        &mut stdin,
+        &notification(
+            "textDocument/didOpen",
+            serde_json::json!({
+                "textDocument": {
+                    "uri": "file:///other.py",
+                    "languageId": "python",
+                    "version": 100,
+                    "text": SOURCE,
+                }
+            }),
+        ),
+    );
+    let diags = wait_for_diagnostics(&rx, Some(100));
+    assert_eq!(
+        diags.as_array().unwrap().len(),
+        0,
+        "python is not in languages: [plaintext]"
+    );
 
     // Shutdown handshake.
     send(&mut stdin, &request(2, "shutdown", serde_json::Value::Null));
