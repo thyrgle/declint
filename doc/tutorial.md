@@ -375,6 +375,10 @@ them — only one language's configs ever apply to a given document, so
 
 ## Where to go from here
 
+* **Level 2:** [`python-tutorial.md`](python-tutorial.md) repeats the
+  arc on a real language — a mini-flake8 with function scopes, the
+  no-lookaround workarounds, and the mutable-default-arguments
+  callback.
 * The **README** has the full config reference: template escapes, scope
   semantics, discovery order, the callback contract, and CLI flags.
 * [`examples/ini/`](../examples/ini) holds the finished setup from this

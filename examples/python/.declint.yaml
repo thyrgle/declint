@@ -1,0 +1,59 @@
+# The finished Python ruleset from doc/python-tutorial.md — parts 1-5
+# assembled into one config.
+
+version: 1
+languages: [python]
+rules:
+  - id: no-tabs
+    pattern: '(?m)^\t+'
+    message: "PEP 8: spaces, not tabs, for indentation"
+    severity: warning
+
+  - id: no-semicolons
+    pattern: '(?m)^\s*[^#\s].*;\s*$'
+    message: "PEP 8: avoid semicolons to separate statements"
+    severity: warning
+
+  - id: no-wildcard-imports
+    pattern: '(?m)^\s*from\s+[\w.]+\s+import\s+\*'
+    message: "wildcard imports make names ambiguous"
+    severity: warning
+
+  - id: bare-except
+    pattern: '(?m)^\s*except\s*:'
+    message: "bare except catches everything — name the exception"
+    severity: warning
+
+  - id: compare-to-none
+    pattern: '==\s*None\b'
+    message: "use 'is None', not '== None'"
+    severity: warning
+
+  - id: assignment-in-condition
+    pattern: '(?m)^\s*(?:if|elif|while)\s+[^#=]*[^=!<>]=[^=]'
+    message: "single '=' assigns — did you mean '=='?"
+    severity: error
+
+  - id: mutable-default
+    pattern: '(?m)^\s*def\s+(?<function>\w+)\s*\([^)]*=[ \t]*(?<default>\[\]|\{\})(?<rest>[^\n]*)'
+    severity: error
+    callback: |
+      return function(c)
+        if c.captures.rest:find("declint:allow") then
+          return nil
+        end
+        return { message = "default " .. c.captures["default"] .. " in '" ..
+                 c.captures["function"] .. "' is shared across calls" }
+      end
+
+scopes:
+  # A top-level function: from a line starting with `def ` to the next
+  # line that starts with any non-whitespace character.
+  - id: function
+    start: '^def\s'
+    end: '^\S'
+    rules:
+      - id: print-in-function
+        pattern: '\bprint\('
+        message: "leftover print() — remove or use logging"
+        severity: warning

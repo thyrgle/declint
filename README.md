@@ -16,7 +16,10 @@ rules:
 
 **New to declint?** [`doc/tutorial.md`](doc/tutorial.md) builds an INI
 linter step by step — first rules, scoped sections, Lua callbacks, and
-the editor payoff — in about 30 minutes.
+the editor payoff — in about 30 minutes. For a second course,
+[`doc/python-tutorial.md`](doc/python-tutorial.md) does the same for a
+Python ruleset: warm-up rules, the no-lookaround tricks, function
+scopes, and the mutable-default-arguments callback.
 
 ## Quick start
 
