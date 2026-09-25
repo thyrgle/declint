@@ -574,10 +574,14 @@ impl Rule {
     }
 }
 
-/// Compiles a scope boundary pattern with multi-line mode forced on, so
-/// `^`/`$` anchor to lines.
+/// Compiles a scope boundary pattern with multi-line and CRLF modes
+/// forced on, so `^`/`$` anchor to lines — including `\r\n` line
+/// endings, which Windows-edited files use.
 fn compile_boundary(pattern: &str) -> Result<regex::Regex, regex::Error> {
-    regex::RegexBuilder::new(pattern).multi_line(true).build()
+    regex::RegexBuilder::new(pattern)
+        .multi_line(true)
+        .crlf(true)
+        .build()
 }
 
 fn parse_scope(

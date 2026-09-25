@@ -211,3 +211,33 @@ fn preset_imports_work_without_a_file() {
         Config::from_str("version: 1\nimport:\n  - preset:markdown\n").unwrap();
     assert!(config.rules.iter().any(|r| r.id == "bare-url"));
 }
+
+#[test]
+fn ini_preset_patterns_work_on_crlf_files() {
+    // The preset's trailing-whitespace rule must be CRLF-tolerant.
+    let ini = declint_core::presets::lookup("ini").unwrap().content;
+    assert!(
+        ini.contains(r"[ \t]+\r?$"),
+        "preset trailing-whitespace must tolerate \\r before the newline"
+    );
+
+    // The pattern shapes themselves, against a CRLF file: a
+    // tab-indented line, trailing spaces before \r, a section header.
+    let dir = project("crlf");
+    let linter = linter_for(
+        &dir,
+        "version: 1\nrules:\n  - id: no-tabs\n    pattern: '(?m)^\\t+'\n    message: t\n  - id: trailing-whitespace\n    pattern: '(?m)[ \\t]+\\r?$'\n    message: w\nscopes:\n  - id: server\n    start: '^\\[server\\]$'\n    end: '^\\['\n    rules:\n      - id: in-server\n        pattern: '(?m)port'\n        message: p\n",
+    );
+    let source = "[server]\r\n\tport = 8000\r\nname = x   \r\n";
+    let v = linter.lint_all_in(
+        declint_core::DocInfo { path: "a.ini", language: "ini" },
+        source,
+    );
+    let ids: Vec<&str> = v.iter().map(|x| x.rule_id.as_str()).collect();
+    assert!(ids.contains(&"no-tabs"), "{v:?}");
+    assert!(
+        ids.contains(&"trailing-whitespace"),
+        "trailing whitespace before \\r must be found: {v:?}"
+    );
+    assert!(ids.contains(&"in-server"), "scope segmentation on CRLF: {v:?}");
+}

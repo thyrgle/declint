@@ -27,11 +27,19 @@ scopes, and the mutable-default-arguments callback.
 ```sh
 cargo install --path crates/declint
 
-# In CI: lint files, print violations, exit 1 if any were found.
-declint check src/**
+# Fastest start: scaffold a config from a preset (python, ini, markdown).
+declint init --lang ini
+declint presets              # list the embedded preset library
+
+# In CI: lint everything under the current directory, annotate the PR,
+# fail the job only on error-severity violations.
+declint check . --format github --fail-on error
+
+# Shell completions (bash; zsh/fish/powershell also supported).
+source <(declint completions bash)
 
 # In your editor: run a language server over stdio.
-declint serve           # reads ./declint.yaml
+declint serve           # discovers .declint.yaml / .declint/ itself
 ```
 
 ### Neovim setup
@@ -313,7 +321,13 @@ $ declint check --format github .
 Directory arguments are walked recursively (`.gitignore` is respected,
 hidden paths and non-UTF-8 files skipped), so the whole incantation for
 a repository is `declint check .` with the config discovery you already
-use locally.
+use locally. Two knobs for CI:
+
+* `--fail-on error|warning|info|hint` — all violations are still
+  reported (and annotated), but only those at or above the threshold
+  fail the job. The default is `hint`: any violation fails.
+* Lua callback `print()`s route to stderr — debug freely, the
+  annotation stream stays clean.
 
 **As a workflow step** (annotates the PR, fails the job on violations):
 
@@ -326,7 +340,7 @@ jobs:
       - uses: thyrgle/declint@v0        # the composite action in this repo
         with:
           path: .
-          declint-version: "0.7.0"
+          declint-version: "0.7.1"
 ```
 
 **Or by hand**, without the action:
@@ -352,6 +366,12 @@ Patterns use the [`regex`](https://docs.rs/regex) crate: linear-time, no
 catastrophic backtracking, named groups via `(?<name>...)`. Lookaround and
 backreferences are not available in regex rules — for matching beyond
 that, use a [parser rule](#parser-rules).
+
+**CRLF files:** `$` in multi-line mode anchors before `\n` — a `\r`
+left by Windows line endings sits between your match and the anchor.
+End-of-line patterns should tolerate it (`[ \t]+\r?$`). Scope
+boundaries are CRLF-safe automatically: their multi-line mode also
+enables CRLF anchors.
 
 ## Workspace layout
 
@@ -385,7 +405,7 @@ filter, style, and (later) suppress per rule.
 
 ## Status
 
-0.7.0 — imports & presets (preset:python/ini/markdown, declint init, declint presets), Lua parser rules (whole-file matchers for duplicates, absence
+0.7.1 — Lua print() routes to stderr, CRLF-safe scope boundaries, --fail-on severity thresholds, shell completions. 0.7.0 — imports & presets (preset:python/ini/markdown, declint init, declint presets), Lua parser rules (whole-file matchers for duplicates, absence
 rules, and custom matching), Lua match callbacks, hidden configs with
 directory discovery, per-language configs, scoped rules; the schema is
 versioned to keep future configs compatible.

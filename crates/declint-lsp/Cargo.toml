@@ -1,6 +1,6 @@
 [package]
 name = "declint-lsp"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 description = "LSP server for declint: publishes regex rule violations as diagnostics via increparse-lsp."
 license = "MIT OR Apache-2.0"
@@ -10,10 +10,10 @@ keywords = ["lint", "lsp", "language-server", "diagnostics"]
 categories = ["development-tools"]
 
 [dependencies]
-declint-core = { path = "../declint-core", version = "0.7.0" }
+declint-core = { path = "../declint-core", version = "0.7.1" }
 increparse = { path = "../../../increparse/crates/increparse", version = "0.1.0" }
 increparse-lsp = { path = "../../../increparse/crates/increparse-lsp", version = "0.2.0" }
 lsp-types = "0.97"
 
 [dev-dependencies]
-declint-lua = { path = "../declint-lua", version = "0.7.0" }
+declint-lua = { path = "../declint-lua", version = "0.7.1" }

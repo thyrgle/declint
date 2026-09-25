@@ -109,6 +109,17 @@ impl Severity {
         }
     }
 
+    /// Numeric rank for threshold comparisons: error > warning > info >
+    /// hint. (Derived ordering would rank them the other way round.)
+    pub fn rank(self) -> u8 {
+        match self {
+            Self::Error => 3,
+            Self::Warning => 2,
+            Self::Info => 1,
+            Self::Hint => 0,
+        }
+    }
+
     /// The config-file spelling of this severity.
     pub fn as_str(&self) -> &'static str {
         match self {

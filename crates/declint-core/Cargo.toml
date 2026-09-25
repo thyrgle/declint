@@ -1,6 +1,6 @@
 [package]
 name = "declint-core"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 description = "Config and regex linting engine for declint: YAML rule files, message templates, violations. No LSP dependencies."
 license = "MIT OR Apache-2.0"

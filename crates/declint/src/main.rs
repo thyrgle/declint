@@ -14,7 +14,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use declint_core::{language_from_extension, ConfigSet, Violation};
 
 #[derive(Parser)]
@@ -53,6 +53,10 @@ enum Command {
         /// commands (inline PR annotations).
         #[arg(short, long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
+        /// Minimum severity that affects the exit code: violations below
+        /// it are still reported, but no longer fail the run.
+        #[arg(long, value_enum, default_value_t = FailOn::Hint)]
+        fail_on: FailOn,
         /// Files to lint. Directories are walked recursively
         /// (respecting .gitignore); files that are not valid UTF-8 are
         /// skipped.
@@ -71,6 +75,12 @@ enum Command {
         #[arg(long)]
         lang: Option<String>,
     },
+    /// Print a shell completion script (bash, zsh, fish, or powershell).
+    Completions {
+        /// The shell to generate completions for.
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -80,6 +90,31 @@ enum OutputFormat {
     /// GitHub Actions workflow commands — violations become inline
     /// annotations on the pull request.
     Github,
+}
+
+/// The severity threshold that trips the exit code. All violations are
+/// always reported; `FailOn` only decides which ones count as failing.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum FailOn {
+    /// Exit 1 on any violation (the default).
+    Hint,
+    /// Exit 1 only on info-or-higher violations.
+    Info,
+    /// Exit 1 only on warning-or-higher violations.
+    Warning,
+    /// Exit 1 only on error violations.
+    Error,
+}
+
+impl FailOn {
+    fn threshold(self) -> declint_core::Severity {
+        match self {
+            Self::Hint => declint_core::Severity::Hint,
+            Self::Info => declint_core::Severity::Info,
+            Self::Warning => declint_core::Severity::Warning,
+            Self::Error => declint_core::Severity::Error,
+        }
+    }
 }
 
 fn load_set(config: Option<&PathBuf>) -> ConfigSet {
@@ -132,6 +167,7 @@ fn check(
     config: Option<&PathBuf>,
     language: Option<&String>,
     format: OutputFormat,
+    fail_on: FailOn,
     files: &[PathBuf],
 ) -> ExitCode {
     let set = load_set(config);
@@ -150,7 +186,9 @@ fn check(
     };
 
     let mut total = 0usize;
+    let mut failing = 0usize;
     let mut unreadable = 0usize;
+    let threshold = fail_on.threshold();
 
     for (path, from_walk) in collect_files(files) {
         let source = match std::fs::read_to_string(&path) {
@@ -183,15 +221,28 @@ fn check(
             OutputFormat::Github => print_github(&path, &source, &violations),
         }
         total += violations.len();
+        failing += violations
+            .iter()
+            .filter(|v| v.severity.rank() >= threshold.rank())
+            .count();
     }
 
     if unreadable > 0 {
         eprintln!("declint: {unreadable} file(s) could not be read");
         return ExitCode::from(2);
     }
-    if total > 0 {
-        eprintln!("declint: {total} violation(s)");
+    if failing > 0 {
+        if failing == total {
+            eprintln!("declint: {total} violation(s)");
+        } else {
+            eprintln!("declint: {failing} failing violation(s) of {total}");
+        }
         return ExitCode::from(1);
+    }
+    if total > 0 {
+        eprintln!(
+            "declint: {total} violation(s) — all below the --fail-on threshold"
+        );
     }
     ExitCode::SUCCESS
 }
@@ -323,9 +374,14 @@ fn main() -> ExitCode {
             config,
             language,
             format,
+            fail_on,
             files,
-        } => check(config.as_ref(), language.as_ref(), format, &files),
+        } => check(config.as_ref(), language.as_ref(), format, fail_on, &files),
         Command::Presets { name } => presets(name.as_ref()),
         Command::Init { lang } => init(lang.as_ref()),
+        Command::Completions { shell } => {
+            clap_complete::generate(shell, &mut Cli::command(), "declint", &mut std::io::stdout());
+            ExitCode::SUCCESS
+        }
     }
 }

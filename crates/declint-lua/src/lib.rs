@@ -239,6 +239,8 @@ impl MatchParser for LuaParser {
 /// should treat an `Err` as fatal for this config set.
 pub fn attach(set: &ConfigSet, callbacks: &mut Callbacks) -> Result<(), ConfigError> {
     let lua = Arc::new(Lua::new());
+    route_print_to_stderr(&lua)
+        .map_err(|e| ConfigError::new(format!("cannot install the print override: {e}")))?;
     for named in set.configs() {
         let base = named
             .path
@@ -337,6 +339,28 @@ fn compile(lua: &Lua, source: String) -> Result<Function, mlua::Error> {
             other.type_name()
         ))),
     }
+}
+
+/// Routes the Lua `print` global to **stderr**.
+///
+/// In `serve` mode stdout is the JSON-RPC channel: a debugging
+/// `print()` from a callback would otherwise inject raw text into the
+/// protocol stream and corrupt the editor session. This keeps `print`
+/// usable for debugging — it lands in the job log / terminal instead.
+fn route_print_to_stderr(lua: &Lua) -> Result<(), mlua::Error> {
+    let tostring = lua.globals().get::<Function>("tostring")?;
+    let print = lua.create_function(move |_lua, args: mlua::MultiValue| {
+        let mut out = String::new();
+        for (i, value) in args.into_iter().enumerate() {
+            if i > 0 {
+                out.push('\t');
+            }
+            out.push_str(&tostring.call::<String>(value)?);
+        }
+        eprintln!("{out}");
+        Ok(())
+    })?;
+    lua.globals().set("print", print)
 }
 
 #[cfg(test)]

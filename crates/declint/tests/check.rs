@@ -319,3 +319,74 @@ fn init_scaffolds_and_refuses_overwrite() {
     assert!(config.contains("preset:python"), "unchanged: {config}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn lua_print_goes_to_stderr_not_the_output_stream() {
+    let dir = std::env::temp_dir().join(format!("ezlint-print-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    write(
+        &dir.join(".declint.yaml"),
+        "version: 1\nrules:\n  - id: dbg\n    pattern: 'X'\n    message: hit\n    callback: |\n      return function(c)\n        print(\"DEBUG from lua callback\")\n        return nil\n      end\n",
+    );
+    write(&dir.join("f.txt"), "XX\n");
+
+    // In --format github mode stdout is the annotation stream (in serve
+    // mode it would be the JSON-RPC channel): a callback's print() must
+    // never touch it.
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["check", "--format", "github", "f.txt"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(!stdout.contains("DEBUG"), "stdout: {stdout}");
+    assert!(stderr.contains("DEBUG from lua callback"), "{stderr}");
+    assert!(stdout.is_empty(), "the callback allows everything: {stdout}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn fail_on_threshold_controls_the_exit_code_but_not_the_output() {
+    let dir = std::env::temp_dir().join(format!("ezlint-failon-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    write(
+        &dir.join(".declint.yaml"),
+        "version: 1\nrules:\n  - id: hint-rule\n    pattern: 'zzz'\n    message: h\n    severity: hint\n  - id: err-rule\n    pattern: 'XXX'\n    message: e\n    severity: error\n",
+    );
+    write(&dir.join("f.ini"), "zzz\nXXX\n");
+
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+            .arg("check")
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        (
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+
+    // Default: any violation fails.
+    let (code, stdout, stderr) = run(&["f.ini"]);
+    assert_eq!(code, Some(1));
+    assert_eq!(stdout.lines().count(), 2);
+    assert!(stderr.contains("2 violation(s)"), "{stderr}");
+
+    // --fail-on error: both reported, only the error fails.
+    let (code, stdout, stderr) = run(&["--fail-on", "error", "f.ini"]);
+    assert_eq!(code, Some(1));
+    assert_eq!(stdout.lines().count(), 2, "output unchanged: {stdout}");
+    assert!(stderr.contains("1 failing violation(s) of 2"), "{stderr}");
+
+    // Only-hint file with --fail-on error: reported, exit 0.
+    write(&dir.join("g.ini"), "zzz\n");
+    let (code, stdout, stderr) = run(&["--fail-on", "error", "g.ini"]);
+    assert_eq!(code, Some(0), "{stderr}");
+    assert!(stdout.contains("hint-rule"), "{stdout}");
+    assert!(stderr.contains("all below the --fail-on threshold"), "{stderr}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
