@@ -22,6 +22,13 @@ rules:
     pattern: '(?m)[ \t]+\r?$'
     message: "Trailing whitespace"
     severity: hint
+    tests:
+      - name: CRLF files are covered
+        text: "x   \r\n"
+        violations: 1
+      - name: clean line passes
+        text: "x\n"
+        violations: 0
 
   - id: empty-value
     pattern: '(?m)^\s*(?<key>[\w-]+)[ \t]*=[ \t]*$'
@@ -49,3 +56,11 @@ scopes:
             end
             return nil
           end
+        tests:
+          - name: out-of-range port
+            text: "[server]\nport = 99999\n"
+            violations: 1
+            messages: ["port must be 1-65535, found 99999"]
+          - name: valid port passes
+            text: "[server]\nport = 8000\n"
+            violations: 0

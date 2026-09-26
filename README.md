@@ -235,6 +235,34 @@ Parser rules close the gaps the tutorials' "ceiling" sections describe:
 duplicates, absence rules ("every function must have a docstring"), and
 custom matching that no regex dialect could express.
 
+### Testing your rules
+
+Rules are programs — pin their behavior with embedded fixtures, run by
+`declint test`:
+
+```yaml
+rules:
+  - id: port-range
+    pattern: '(?m)^\s*port[ \t]*=[ \t]*(?<port>\S+)'
+    severity: error
+    tests:
+      - name: out-of-range port
+        text: "[server]\nport = 99999\n"
+        violations: 1
+        messages: ["port must be 1-65535, found 99999"]
+      - name: valid port passes
+        text: "[server]\nport = 8000\n"
+        violations: 0
+```
+
+Each test runs only that rule over `text` (scopes included — scoped
+rules test their scoped behavior), then checks the violation count and
+that each expected `messages` entry appears. `declint test` runs every
+embedded test in the discovered configs — imported presets included —
+and exits 1 on any failure. `declint explain <file>` shows the other
+half of the picture: which configs applied, which rules resolved, and
+what matched in a given file.
+
 ### Scoped rules
 
 A `scopes` entry segments the file and runs its rules **only inside those
@@ -437,7 +465,7 @@ filter, style, and (later) suppress per rule.
 
 ## Status
 
-0.8.0 — declint install (gh: rulesets vendored into the project or the global store, importable as global:<pkg>). 0.7.1 — Lua print() routes to stderr, CRLF-safe scope boundaries, --fail-on severity thresholds, shell completions. 0.7.0 — imports & presets (preset:python/ini/markdown, declint init, declint presets), Lua parser rules (whole-file matchers for duplicates, absence
+0.9.0 — declint test (embedded rule fixtures), declint explain (config/rule visibility for a file), --format json. 0.8.0 — declint install (gh: rulesets vendored into the project or the global store, importable as global:<pkg>). 0.7.1 — Lua print() routes to stderr, CRLF-safe scope boundaries, --fail-on severity thresholds, shell completions. 0.7.0 — imports & presets (preset:python/ini/markdown, declint init, declint presets), Lua parser rules (whole-file matchers for duplicates, absence
 rules, and custom matching), Lua match callbacks, hidden configs with
 directory discovery, per-language configs, scoped rules; the schema is
 versioned to keep future configs compatible.

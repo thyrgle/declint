@@ -280,6 +280,45 @@ impl Linter {
         self.lint_merged_in(info, source, &segments)
     }
 
+    /// Runs a single rule over a source snapshot — global or scoped
+    /// automatically, by where the rule lives. Unknown ids are an error.
+    /// Used by `declint test` to exercise one rule's fixtures.
+    pub fn lint_rule(
+        &self,
+        rule_id: &str,
+        info: DocInfo<'_>,
+        source: &str,
+    ) -> Result<Vec<Violation>, String> {
+        let matchers = |rule: &Rule| Matchers {
+            callback: self.callbacks.get(rule.id.as_str()).map(|a| a.as_ref()),
+            parser: self.parsers.get(rule.id.as_str()).map(|a| a.as_ref()),
+        };
+        if let Some(rule) = self.rules.iter().find(|rule| rule.id == rule_id) {
+            let mut out = Vec::new();
+            collect_rule(rule, matchers(rule), info, source, source, 0, &mut out);
+            return Ok(out);
+        }
+        for scope in &self.scopes {
+            if let Some(rule) = scope.rules.iter().find(|rule| rule.id == rule_id) {
+                let mut out = Vec::new();
+                for segment in scopes::segment(source, scope) {
+                    let region = &source[segment.to_range()];
+                    collect_rule(
+                        rule,
+                        matchers(rule),
+                        info,
+                        source,
+                        region,
+                        segment.start,
+                        &mut out,
+                    );
+                }
+                return Ok(out);
+            }
+        }
+        Err(format!("unknown rule `{rule_id}`"))
+    }
+
     fn collect_global(&self, info: DocInfo<'_>, source: &str, out: &mut Vec<Violation>) {
         for rule in &self.rules {
             let matchers = Matchers {

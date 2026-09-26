@@ -22,3 +22,10 @@ rules:
     pattern: '(?m)https?://\S+$'
     message: "bare URL — wrap it in angle brackets"
     severity: hint
+    tests:
+      - name: URL at end of line
+        text: "see http://x.com\n"
+        violations: 1
+      - name: prose after the URL passes
+        text: "see http://x.com now\n"
+        violations: 0

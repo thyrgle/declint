@@ -195,6 +195,21 @@ impl Config {
     }
 }
 
+/// One embedded rule test: a snippet and what the rule should do with
+/// it. Run by `declint test`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleTest {
+    /// Optional label shown in test output.
+    pub name: Option<String>,
+    /// The snippet the rule runs against.
+    pub text: String,
+    /// How many violations of the rule the snippet should produce
+    /// (default 0).
+    pub violations: usize,
+    /// Each of these must appear among the rendered messages.
+    pub messages: Vec<String>,
+}
+
 /// One validated lint rule.
 #[derive(Debug, Clone)]
 pub struct Rule {
@@ -216,6 +231,9 @@ pub struct Rule {
     /// The rule's parser reference, if any — mutually exclusive with
     /// [`Rule::pattern`].
     pub parser: Option<CallbackRef>,
+    /// Embedded fixtures, run by `declint test`. Unused by the lint
+    /// engine itself.
+    pub tests: Vec<RuleTest>,
     /// How the rule finds matches — construction only succeeds when the
     /// regex (if any) is valid.
     pub(crate) matcher: Matcher,
@@ -777,7 +795,7 @@ fn parse_rule(
         if let Some(key) = key.as_str() {
             if !matches!(
                 key,
-                "id" | "pattern" | "message" | "severity" | "callback" | "parser"
+                "id" | "pattern" | "message" | "severity" | "callback" | "parser" | "tests"
             ) {
                 return Err(at_rule(format!(
                     "unknown key `{key}` (expected one of `id`, `pattern`, `parser`, \
@@ -887,6 +905,8 @@ fn parse_rule(
         },
     };
 
+    let tests = parse_tests(map, &at_rule)?;
+
     Ok(Rule {
         id,
         pattern,
@@ -895,7 +915,85 @@ fn parse_rule(
         callback,
         parser,
         matcher,
+        tests,
     })
+}
+
+/// Parses a rule's embedded `tests:` fixtures.
+fn parse_tests(
+    map: &serde_yaml::Mapping,
+    at_rule: &dyn Fn(String) -> ConfigError,
+) -> Result<Vec<RuleTest>, ConfigError> {
+    let Some(value) = map.get(Value::from("tests")) else {
+        return Ok(Vec::new());
+    };
+    let Value::Sequence(entries) = value else {
+        return Err(at_rule("`tests` must be a list of test mappings".into()));
+    };
+    let mut tests = Vec::new();
+    for entry in entries {
+        let Value::Mapping(test) = entry else {
+            return Err(at_rule("each test must be a mapping".into()));
+        };
+        for key in test.keys() {
+            if let Some(key) = key.as_str() {
+                if !matches!(key, "name" | "text" | "violations" | "messages") {
+                    return Err(at_rule(format!(
+                        "unknown test key `{key}` (expected one of `name`, `text`, \
+                         `violations`, `messages`)"
+                    )));
+                }
+            }
+        }
+        let name = match test.get(Value::from("name")) {
+            None => None,
+            Some(value) => Some(
+                value
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| at_rule("test `name` must be a non-empty string".into()))?
+                    .to_string(),
+            ),
+        };
+        let text = test
+            .get(Value::from("text"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| at_rule("test must have a non-empty `text` snippet".into()))?
+            .to_string();
+        let violations = match test.get(Value::from("violations")) {
+            None => 0,
+            Some(value) => value
+                .as_u64()
+                .ok_or_else(|| at_rule("test `violations` must be a non-negative integer".into()))?
+                as usize,
+        };
+        let messages = match test.get(Value::from("messages")) {
+            None => Vec::new(),
+            Some(value) => {
+                let Value::Sequence(entries) = value else {
+                    return Err(at_rule("test `messages` must be a list of strings".into()));
+                };
+                let mut messages = Vec::new();
+                for entry in entries {
+                    let Some(message) = entry.as_str().filter(|s| !s.is_empty()) else {
+                        return Err(at_rule(
+                            "test `messages` entries must be non-empty strings".into(),
+                        ));
+                    };
+                    messages.push(message.to_string());
+                }
+                messages
+            }
+        };
+        tests.push(RuleTest {
+            name,
+            text,
+            violations,
+            messages,
+        });
+    }
+    Ok(tests)
 }
 
 /// Finds the 1-based line of each `- ` item of the block sequence stored

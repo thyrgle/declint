@@ -11,6 +11,7 @@
 //! from the current directory: `.declint.yaml`, then `.declint/`, then
 //! `declint.yaml`, walking up through parent directories.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -77,6 +78,28 @@ enum Command {
         #[arg(long)]
         lang: Option<String>,
     },
+    /// Run the embedded `tests:` fixtures for rules in the config.
+    Test {
+        /// Path to a config file or a directory of configs; omitted =
+        /// discover one from the current directory upward.
+        #[arg(short, long)]
+        config: Option<PathBuf>,
+        /// Only run tests for these rule ids.
+        #[arg(value_name = "RULE")]
+        rules: Vec<String>,
+    },
+    /// Explain which configs, rules, and scopes apply to a file.
+    Explain {
+        /// Path to a config file or a directory of configs; omitted =
+        /// discover one from the current directory upward.
+        #[arg(short, long)]
+        config: Option<PathBuf>,
+        /// Pretend the file has this language id instead of inferring.
+        #[arg(short, long)]
+        language: Option<String>,
+        /// The file to explain.
+        file: PathBuf,
+    },
     /// Install a ruleset from GitHub (vendored, reviewed, committed).
     Install {
         /// Install into the global store (~/.declint/store) instead of
@@ -101,6 +124,8 @@ enum OutputFormat {
     /// GitHub Actions workflow commands — violations become inline
     /// annotations on the pull request.
     Github,
+    /// A JSON array of violation objects.
+    Json,
 }
 
 /// The severity threshold that trips the exit code. All violations are
@@ -174,6 +199,29 @@ fn collect_files(paths: &[PathBuf]) -> Vec<(PathBuf, bool)> {
     out
 }
 
+fn print_json(
+    items: &mut Vec<serde_json::Value>,
+    path: &std::path::Path,
+    source: &str,
+    violations: &[Violation],
+) {
+    for violation in violations {
+        let (line, col) = declint_core::line_col(source, violation.span.start);
+        let last = violation.span.end.saturating_sub(1).max(violation.span.start);
+        let (end_line, end_col) = declint_core::line_col(source, last);
+        items.push(serde_json::json!({
+            "file": path.display().to_string(),
+            "line": line,
+            "col": col,
+            "endLine": end_line,
+            "endCol": end_col,
+            "rule": violation.rule_id,
+            "severity": violation.severity.as_str(),
+            "message": violation.message,
+        }));
+    }
+}
+
 fn check(
     config: Option<&PathBuf>,
     language: Option<&String>,
@@ -200,6 +248,7 @@ fn check(
     let mut failing = 0usize;
     let mut unreadable = 0usize;
     let threshold = fail_on.threshold();
+    let mut json_items = Vec::new();
 
     for (path, from_walk) in collect_files(files) {
         let source = match std::fs::read_to_string(&path) {
@@ -230,6 +279,7 @@ fn check(
         match format {
             OutputFormat::Text => print_text(&path, &source, &violations),
             OutputFormat::Github => print_github(&path, &source, &violations),
+            OutputFormat::Json => print_json(&mut json_items, &path, &source, &violations),
         }
         total += violations.len();
         failing += violations
@@ -241,6 +291,9 @@ fn check(
     if unreadable > 0 {
         eprintln!("declint: {unreadable} file(s) could not be read");
         return ExitCode::from(2);
+    }
+    if format == OutputFormat::Json {
+        println!("{}", serde_json::to_string_pretty(&json_items).unwrap_or_else(|_| "[]".into()));
     }
     if failing > 0 {
         if failing == total {
@@ -367,6 +420,238 @@ fn init(lang: Option<&String>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn run_tests(config: Option<&PathBuf>, filters: &[String]) -> ExitCode {
+    let set = load_set(config);
+    let callbacks = load_callbacks(&set);
+    let linters = set
+        .configs()
+        .iter()
+        .map(|named| declint_core::Linter::new(named.config.clone(), &callbacks))
+        .collect::<Result<Vec<_>, _>>();
+    let linters = match linters {
+        Ok(linters) => linters,
+        Err(e) => {
+            eprintln!("declint: {e}");
+            return ExitCode::from(2);
+        }
+    };
+
+    if !filters.is_empty() {
+        let known: std::collections::HashSet<String> = set
+            .configs()
+            .iter()
+            .flat_map(|named| {
+                named
+                    .config
+                    .rules
+                    .iter()
+                    .map(|r| r.id.clone())
+                    .chain(named.config.scopes.iter().flat_map(|s| {
+                        s.rules.iter().map(|r| r.id.clone())
+                    }))
+            })
+            .collect();
+        if let Some(missing) = filters.iter().find(|f| !known.contains(*f)) {
+            eprintln!("declint: unknown rule `{missing}`");
+            return ExitCode::from(2);
+        }
+    }
+
+    let mut passed = 0usize;
+    let mut failed = 0usize;
+    let mut any_tests = false;
+
+    for (i, named) in set.configs().iter().enumerate() {
+        let mut rules: Vec<&declint_core::Rule> = named.config.rules.iter().collect();
+        for scope in &named.config.scopes {
+            rules.extend(scope.rules.iter());
+        }
+        for rule in rules {
+            if !filters.is_empty() && !filters.iter().any(|f| f == &rule.id) {
+                continue;
+            }
+            if rule.tests.is_empty() {
+                continue;
+            }
+            any_tests = true;
+            for test in &rule.tests {
+                let label = test.name.as_deref().unwrap_or("test");
+                let violations = linters[i].lint_rule(
+                    &rule.id,
+                    declint_core::DocInfo::none(),
+                    &test.text,
+                );
+                let mut problems = Vec::new();
+                match violations {
+                    Err(e) => problems.push(format!("callback/parser error: {e}")),
+                    Ok(violations) => {
+                        if violations.len() != test.violations {
+                            problems.push(format!(
+                                "expected {} violation(s), got {}",
+                                test.violations,
+                                violations.len()
+                            ));
+                        }
+                        for expected in &test.messages {
+                            if !violations.iter().any(|v| &v.message == expected) {
+                                problems.push(format!("missing message: {expected:?}"));
+                            }
+                        }
+                    }
+                }
+                if problems.is_empty() {
+                    passed += 1;
+                    println!("PASS {} [{}] {label}", rule.id, named.path.display());
+                } else {
+                    failed += 1;
+                    println!("FAIL {} [{}] {label}", rule.id, named.path.display());
+                    for problem in problems {
+                        println!("  {problem}");
+                    }
+                }
+            }
+        }
+    }
+
+    if !any_tests {
+        println!("declint: no embedded tests found — add a `tests:` list to a rule");
+        return ExitCode::SUCCESS;
+    }
+    if failed > 0 {
+        eprintln!("declint: {passed} test(s) passed, {failed} failed");
+        return ExitCode::from(1);
+    }
+    println!("declint: {passed} test(s) passed");
+    ExitCode::SUCCESS
+}
+
+fn explain(
+    config: Option<&PathBuf>,
+    language: Option<&String>,
+    file: &PathBuf,
+) -> ExitCode {
+    let set = load_set(config);
+    let callbacks = load_callbacks(&set);
+
+    let source = match std::fs::read_to_string(file) {
+        Ok(source) => source,
+        Err(e) => {
+            eprintln!("declint: cannot read {}: {e}", file.display());
+            return ExitCode::from(2);
+        }
+    };
+    let inferred = language_from_extension(file);
+    let detected = language.map(String::as_str).or(inferred.as_deref());
+    println!(
+        "file: {} (language: {})",
+        file.display(),
+        detected.unwrap_or("<none>")
+    );
+    println!(
+        "config site: {}",
+        set.configs()
+            .first()
+            .map(|named| named.path.display().to_string())
+            .unwrap_or_else(|| "<none>".into())
+    );
+
+    let linters = set
+        .configs()
+        .iter()
+        .map(|named| declint_core::Linter::new(named.config.clone(), &callbacks))
+        .collect::<Result<Vec<_>, _>>();
+
+    for (i, named) in set.configs().iter().enumerate() {
+        let applies = named.config.matches_language(detected.unwrap_or(""));
+        let languages = if named.config.languages.is_empty() {
+            "all".to_string()
+        } else {
+            named.config.languages.join(", ")
+        };
+        println!(
+            "\nconfig {} [languages: {languages}] — {}",
+            named.path.display(),
+            if applies { "applied" } else { "skipped (language)" }
+        );
+        if !applies {
+            continue;
+        }
+
+        // Resolution status for every rule, global and scoped.
+        let mut rows: Vec<(String, &declint_core::Rule)> = named
+            .config
+            .rules
+            .iter()
+            .map(|r| (String::new(), r))
+            .collect();
+        for scope in &named.config.scopes {
+            for rule in &scope.rules {
+                rows.push((format!(" [scope {}]", scope.id), rule));
+            }
+        }
+        for (prefix, rule) in &rows {
+            let kind = if rule.parser.is_some() {
+                "parser"
+            } else {
+                "regex"
+            };
+            let extra = match (&rule.callback, &rule.parser) {
+                (Some(reference), _) => match callbacks.resolve(reference) {
+                    Some(_) => format!(", callback: {}", reference.describe()),
+                    None => format!(
+                        ", callback: {} — NOT REGISTERED",
+                        reference.describe()
+                    ),
+                },
+                (None, Some(reference)) => match callbacks.resolve_parser(reference) {
+                    Some(_) => format!(", parser: {}", reference.describe()),
+                    None => format!(
+                        ", parser: {} — NOT REGISTERED",
+                        reference.describe()
+                    ),
+                },
+                (None, None) => String::new(),
+            };
+            let tests = if rule.tests.is_empty() {
+                String::new()
+            } else {
+                format!(", {} test(s)", rule.tests.len())
+            };
+            println!(
+                "  {}{}: {} [{kind}{extra}{tests}]",
+                rule.id,
+                prefix,
+                rule.severity
+            );
+        }
+
+        // Match and violation counts, when the linter is constructible.
+        match &linters {
+            Ok(linters) => {
+                let info = declint_core::DocInfo {
+                    path: &file.display().to_string(),
+                    language: detected.unwrap_or(""),
+                };
+                let violations = linters[i].lint_all_in(info, &source);
+                println!("  violations in this file: {}", violations.len());
+                let mut per_rule: HashMap<&str, usize> = HashMap::new();
+                for violation in &violations {
+                    *per_rule.entry(violation.rule_id.as_str()).or_default() += 1;
+                }
+                let mut counts: Vec<(&str, usize)> = per_rule.into_iter().collect();
+                counts.sort();
+                for (id, count) in counts {
+                    println!("    {id}: {count} match(es)");
+                }
+            }
+            Err(e) => {
+                println!("  match counts unavailable: {e}");
+            }
+        }
+    }
+    ExitCode::SUCCESS
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
@@ -390,6 +675,12 @@ fn main() -> ExitCode {
         } => check(config.as_ref(), language.as_ref(), format, fail_on, &files),
         Command::Presets { name } => presets(name.as_ref()),
         Command::Init { lang } => init(lang.as_ref()),
+        Command::Test { config, rules } => run_tests(config.as_ref(), &rules),
+        Command::Explain {
+            config,
+            language,
+            file,
+        } => explain(config.as_ref(), language.as_ref(), &file),
         Command::Install { global, source } => {
             let parsed = match install::parse_gh_source(&source) {
                 Ok(parsed) => parsed,

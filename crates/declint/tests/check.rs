@@ -413,3 +413,97 @@ fn gh_imports_in_configs_are_rejected_with_an_install_hint() {
     assert!(stderr.contains("declint install"), "{stderr}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn test_command_runs_embedded_fixtures() {
+    let dir = std::env::temp_dir().join(format!("ezlint-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    write(
+        &dir.join(".declint.yaml"),
+        "version: 1\nrules:\n  - id: probe\n    pattern: '\\bTODO\\b'\n    message: 'TODO found'\n    tests:\n      - name: flagged\n        text: '# TODO fix'\n        violations: 1\n        messages: ['TODO found']\n      - name: clean passes\n        text: '# clean'\n        violations: 0\n      - name: wrong count fails\n        text: 'TODO TODO'\n        violations: 5\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["test"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stdout.contains("PASS probe ["), "{stdout}");
+    assert!(stdout.contains("] flagged"), "{stdout}");
+    assert!(stdout.contains("] clean passes"), "{stdout}");
+    assert!(stdout.contains("FAIL probe ["), "{stdout}");
+    assert!(stdout.contains("] wrong count fails"), "{stdout}");
+    assert!(stdout.contains("expected 5 violation(s), got 2"), "{stdout}");
+    assert!(stderr.contains("2 test(s) passed, 1 failed"), "{stderr}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn explain_reports_configs_rules_and_counts() {
+    let dir = std::env::temp_dir().join(format!("ezlint-explain-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    write(
+        &dir.join(".declint.yaml"),
+        "version: 1\nlanguages: [python]\nrules:\n  - id: probe\n    pattern: '\\bTODO\\b'\n    message: found\n",
+    );
+    write(&dir.join("app.py"), "# TODO fix\n");
+    write(&dir.join("notes.md"), "TODO fix\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["explain", "app.py"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(stdout.contains("file: app.py (language: python)"), "{stdout}");
+    assert!(stdout.contains("— applied"), "{stdout}");
+    assert!(stdout.contains("probe: warning [regex]"), "{stdout}");
+    assert!(stdout.contains("violations in this file: 1"), "{stdout}");
+
+    // A language-skipped config is reported as skipped, not applied.
+    write(
+        &dir.join(".declint.yaml"),
+        "version: 1\nlanguages: [markdown]\nrules:\n  - id: probe\n    pattern: '\\bTODO\\b'\n    message: found\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["explain", "app.py"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    // Skipped configs are named and never contribute a violations line.
+    assert!(stdout.contains("skipped (language)"), "{stdout}");
+    assert!(!stdout.contains("applied"), "{stdout}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn json_format_emits_parseable_violation_objects() {
+    let dir = std::env::temp_dir().join(format!("ezlint-json-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    write(
+        &dir.join(".declint.yaml"),
+        "version: 1\nrules:\n  - id: no-sudo\n    pattern: '\\bsudo\\b'\n    message: 'no sudo'\n    severity: error\n",
+    );
+    write(&dir.join("a.ini"), "run sudo here\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["check", "--format", "json", "a.ini"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let items = parsed.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["file"], "a.ini");
+    assert_eq!(items[0]["line"], 1);
+    assert_eq!(items[0]["col"], 5);
+    assert_eq!(items[0]["rule"], "no-sudo");
+    assert_eq!(items[0]["severity"], "error");
+    assert_eq!(items[0]["message"], "no sudo");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

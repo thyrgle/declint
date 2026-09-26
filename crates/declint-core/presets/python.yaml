@@ -21,6 +21,13 @@ rules:
     pattern: '(?m)^\t+'
     message: "PEP 8: spaces, not tabs, for indentation"
     severity: warning
+    tests:
+      - name: tab indentation is flagged
+        text: "\tindented"
+        violations: 1
+      - name: clean lines pass
+        text: "indented"
+        violations: 0
 
   - id: no-semicolons
     pattern: '(?m)^\s*[^#\s].*;\s*$'
@@ -58,6 +65,14 @@ rules:
         return { message = "default " .. c.captures["default"] .. " in '" ..
                  c.captures["function"] .. "' is shared across calls" }
       end
+    tests:
+      - name: shared default is flagged
+        text: "def f(a = []):"
+        violations: 1
+        messages: ["default [] in 'f' is shared across calls"]
+      - name: allow marker vetoes
+        text: "def f(a = []):  # declint:allow"
+        violations: 0
 
 scopes:
   # A top-level function — including `async def`. The region ends at the
@@ -71,3 +86,10 @@ scopes:
         pattern: '\bprint\('
         message: "leftover print() — remove or use logging"
         severity: warning
+        tests:
+          - name: print inside a function is flagged
+            text: "def f():\n    print(1)\n"
+            violations: 1
+          - name: top-level print is allowed
+            text: "print(1)\n"
+            violations: 0
