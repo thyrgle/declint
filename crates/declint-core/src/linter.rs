@@ -82,6 +82,8 @@ pub struct Violation {
     pub span: Span,
     /// The rule's message template rendered for this match.
     pub message: String,
+    /// The rendered replacement, when the rule has a `fix` template.
+    pub fix: Option<String>,
 }
 
 impl PartialOrd for Violation {
@@ -220,6 +222,7 @@ impl Linter {
     pub fn lint_in(&self, info: DocInfo<'_>, source: &str) -> Vec<Violation> {
         let mut out = Vec::new();
         self.collect_global(info, source, &mut out);
+        crate::suppressions::apply(source, &mut out);
         sort_violations(&mut out);
         out
     }
@@ -241,6 +244,7 @@ impl Linter {
     ) -> Vec<Violation> {
         let mut out = Vec::new();
         self.collect_segments(info, source, segments, &mut out);
+        crate::suppressions::apply(source, &mut out);
         sort_violations(&mut out);
         out
     }
@@ -263,6 +267,7 @@ impl Linter {
         let mut out = Vec::new();
         self.collect_global(info, source, &mut out);
         self.collect_segments(info, source, segments, &mut out);
+        crate::suppressions::apply(source, &mut out);
         sort_violations(&mut out);
         out
     }
@@ -296,6 +301,8 @@ impl Linter {
         if let Some(rule) = self.rules.iter().find(|rule| rule.id == rule_id) {
             let mut out = Vec::new();
             collect_rule(rule, matchers(rule), info, source, source, 0, &mut out);
+            crate::suppressions::apply(source, &mut out);
+            sort_violations(&mut out);
             return Ok(out);
         }
         for scope in &self.scopes {
@@ -313,6 +320,8 @@ impl Linter {
                         &mut out,
                     );
                 }
+                crate::suppressions::apply(source, &mut out);
+                sort_violations(&mut out);
                 return Ok(out);
             }
         }
@@ -409,6 +418,7 @@ fn collect_rule(
                     severity: Severity::Error,
                     span: Span::new(offset, offset),
                     message: format!("rule '{}': parser error: {e}", rule.id),
+                    fix: None,
                 });
                 return;
             }
@@ -470,11 +480,19 @@ fn collect_rule(
                 }
             }
         };
+        let fix = rule
+            .fix
+            .as_ref()
+            .map(|template| {
+                let match_text = source.get(start..finish).unwrap_or_default();
+                template.render_with(match_text, &raw.captures)
+            });
         out.push(Violation {
             rule_id: rule.id.clone(),
             severity,
             span: Span::new(start, finish),
             message,
+            fix,
         });
     }
 }

@@ -231,6 +231,10 @@ pub struct Rule {
     /// The rule's parser reference, if any — mutually exclusive with
     /// [`Rule::pattern`].
     pub parser: Option<CallbackRef>,
+    /// The fix template, if any: replaces each match, with captures
+    /// interpolated like messages. Surfaces as a quickfix in editors
+    /// and as `declint check --fix`.
+    pub fix: Option<Template>,
     /// Embedded fixtures, run by `declint test`. Unused by the lint
     /// engine itself.
     pub tests: Vec<RuleTest>,
@@ -795,7 +799,8 @@ fn parse_rule(
         if let Some(key) = key.as_str() {
             if !matches!(
                 key,
-                "id" | "pattern" | "message" | "severity" | "callback" | "parser" | "tests"
+                "id" | "pattern" | "message" | "severity" | "callback" | "parser"
+                    | "fix" | "tests"
             ) {
                 return Err(at_rule(format!(
                     "unknown key `{key}` (expected one of `id`, `pattern`, `parser`, \
@@ -892,6 +897,26 @@ fn parse_rule(
         }
     };
 
+    let fix = match map.get(Value::from("fix")) {
+        None => None,
+        Some(value) => {
+            let source = value
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| at_rule("`fix` must be a non-empty string".into()))?;
+            let template = Template::parse(source)
+                .map_err(|e| at_rule(format!("invalid fix template: {e}")))?;
+            // Placeholder names are checked against the regex's capture
+            // groups; parser rules provide their own names at runtime.
+            if let Matcher::Regex(regex) = &matcher {
+                template
+                    .validate(regex)
+                    .map_err(|e| at_rule(format!("invalid fix template: {e}")))?;
+            }
+            Some(template)
+        }
+    };
+
     let severity = match map.get(Value::from("severity")) {
         None => Severity::Warning,
         Some(value) => match value.as_str().and_then(Severity::parse) {
@@ -914,6 +939,7 @@ fn parse_rule(
         message,
         callback,
         parser,
+        fix,
         matcher,
         tests,
     })

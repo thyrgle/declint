@@ -73,6 +73,7 @@ mod config_set;
 mod lang;
 mod linter;
 mod scopes;
+mod suppressions;
 mod template;
 
 pub use callback::{
@@ -83,6 +84,7 @@ pub use config_set::{ConfigSet, NamedConfig, ScopeEntry, CONFIG_DIR, CONFIG_FILE
 pub use lang::language_from_extension;
 pub use linter::{line_col, DocInfo, Linter, Span, Violation};
 pub use scopes::{segment, segment_all};
+pub use suppressions::Suppressions;
 pub use template::Template;
 
 /// How serious a violation is.

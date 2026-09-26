@@ -48,9 +48,11 @@ impl Template {
                                     chars.next();
                                     break;
                                 }
+                                // Names may also be capture numbers
+                                // (`{1}`, `{2}`, ...).
                                 Some(&n)
                                     if name.is_empty()
-                                        && (n.is_ascii_alphabetic() || n == '_') =>
+                                        && (n.is_ascii_alphanumeric() || n == '_') =>
                                 {
                                     name.push(n);
                                     chars.next();
@@ -98,17 +100,25 @@ impl Template {
         Ok(Self(parts))
     }
 
-    /// Checks every placeholder against `regex`'s capture names.
+    /// Checks every placeholder against `regex`'s capture groups —
+    /// named groups by name, numbered groups by index (`{1}` needs a
+    /// first capture group).
     pub fn validate(&self, regex: &regex::Regex) -> Result<(), String> {
         for part in &self.0 {
             if let Part::Placeholder(name) = part {
-                if name != "match" && !regex.capture_names().flatten().any(|n| n == name) {
-                    return Err(format!(
-                        "placeholder `{{{name}}}` does not name a capture group of the rule's \
-                         pattern (known groups: {})",
-                        known_groups(regex),
-                    ));
+                if name == "match"
+                    || regex.capture_names().flatten().any(|n| n == name)
+                    || name
+                        .parse::<usize>()
+                        .is_ok_and(|index| index >= 1 && index < regex.captures_len())
+                {
+                    continue;
                 }
+                return Err(format!(
+                    "placeholder `{{{name}}}` does not name a capture group of the rule's \
+                     pattern (known groups: {})",
+                    known_groups(regex),
+                ));
             }
         }
         Ok(())
@@ -218,7 +228,7 @@ mod tests {
 
     #[test]
     fn malformed_placeholders_rejected() {
-        for src in ["{", "{1x}", "{ bad}", "o{" ] {
+        for src in ["{", "{ bad}", "o{"] {
             assert!(Template::parse(src).is_err(), "{src:?} must not parse");
         }
     }

@@ -42,7 +42,7 @@ use increparse::{Engine, Outcome, Pass, Span};
 use increparse_lsp::{Document, SimpleLanguage};
 #[cfg(test)]
 use increparse_lsp::Language;
-use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
+use lsp_types::{CodeAction, CodeActionKind, Diagnostic, DiagnosticSeverity, NumberOrString, TextEdit, WorkspaceEdit};
 
 /// A parse-tree context: the whole file, or one scope's region.
 ///
@@ -172,52 +172,120 @@ pub fn language(
 ) -> Result<SimpleLanguage<Ctx>, ConfigError> {
     let table = set.scope_table();
     // Global scope index -> (config index, local scope index).
-    let owners: Vec<(usize, usize)> =
-        table.iter().map(|e| (e.config, e.local)).collect();
+    let owners: std::sync::Arc<Vec<(usize, usize)>> =
+        std::sync::Arc::new(table.iter().map(|e| (e.config, e.local)).collect());
     let scopes: Vec<Scope> = table.into_iter().map(|e| e.scope).collect();
-    let linters: Vec<Linter> = set
-        .configs()
-        .iter()
-        .map(|named| Linter::new(named.config.clone(), callbacks))
-        .collect::<Result<_, _>>()?;
-    let languages: Vec<Vec<String>> = set
-        .configs()
-        .iter()
-        .map(|named| named.config.languages.clone())
-        .collect();
+    let linters: std::sync::Arc<Vec<Linter>> = std::sync::Arc::new(
+        set.configs()
+            .iter()
+            .map(|named| Linter::new(named.config.clone(), callbacks))
+            .collect::<Result<_, _>>()?,
+    );
+    let languages: std::sync::Arc<Vec<Vec<String>>> = std::sync::Arc::new(
+        set.configs()
+            .iter()
+            .map(|named| named.config.languages.clone())
+            .collect(),
+    );
 
     let engine = Engine::with((Segmenter { scopes }, Accept));
-    Ok(SimpleLanguage::new(engine, Ctx::Root).extra_diagnostics(move |doc| {
-        let text = doc.text();
-        let info = DocInfo {
-            path: doc.uri().as_str(),
-            language: doc.language_id(),
-        };
-        // Group the tree's regions per config, remapping global scope
-        // indices to each config's local ones.
-        let mut per_config: Vec<Vec<(usize, declint_core::Span)>> =
-            vec![Vec::new(); linters.len()];
-        for (global, span) in tree_segments(doc) {
-            if let Some(&(config, local)) = owners.get(global) {
-                per_config[config].push((local, span));
+    let actions_linters = std::sync::Arc::clone(&linters);
+    let actions_languages = std::sync::Arc::clone(&languages);
+    let extra_linters = std::sync::Arc::clone(&linters);
+    let extra_owners = std::sync::Arc::clone(&owners);
+    let extra_languages = std::sync::Arc::clone(&languages);
+    Ok(SimpleLanguage::new(engine, Ctx::Root)
+        .extra_diagnostics(move |doc| {
+            let text = doc.text();
+            let info = DocInfo {
+                path: doc.uri().as_str(),
+                language: doc.language_id(),
+            };
+            let per_config = per_config_segments(doc, extra_linters.len(), &extra_owners);
+            let mut violations: Vec<Violation> = Vec::new();
+            for (i, linter) in extra_linters.iter().enumerate() {
+                if !applies(&extra_languages[i], doc.language_id()) {
+                    continue;
+                }
+                violations.extend(linter.lint_merged_in(info, text, &per_config[i]));
             }
-        }
+            violations.sort();
+            violations
+                .iter()
+                .map(|violation| diagnostic(doc, violation))
+                .collect()
+        })
+        .code_action_fn(move |doc, range| {
+            let text = doc.text();
+            let info = DocInfo {
+                path: doc.uri().as_str(),
+                language: doc.language_id(),
+            };
+            let per_config = per_config_segments(doc, linters.len(), &owners);
+            let range_start = doc.offset(range.start);
+            let range_end = doc.offset(range.end);
+            let mut actions: Vec<CodeAction> = Vec::new();
+            for (i, linter) in actions_linters.iter().enumerate() {
+                if !applies(&actions_languages[i], doc.language_id()) {
+                    continue;
+                }
+                for violation in linter.lint_merged_in(info, text, &per_config[i]) {
+                    let Some(fix) = &violation.fix else {
+                        continue;
+                    };
+                    let overlaps =
+                        violation.span.start <= range_end && violation.span.end >= range_start;
+                    if !overlaps {
+                        continue;
+                    }
+                    let span =
+                        increparse::Span::new(violation.span.start, violation.span.end, doc.revision());
+                    actions.push(CodeAction {
+                        title: format!(
+                            "declint: apply fix for '{}'",
+                            violation.rule_id
+                        ),
+                        kind: Some(CodeActionKind::QUICKFIX),
+                        edit: Some(WorkspaceEdit {
+                            changes: Some(
+                                [(
+                                    doc.uri().clone(),
+                                    vec![TextEdit {
+                                        range: doc.range(span),
+                                        new_text: fix.clone(),
+                                    }],
+                                )]
+                                .into_iter()
+                                .collect(),
+                            ),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    });
+                }
+            }
+            actions
+        }))
+}
 
-        let mut violations: Vec<Violation> = Vec::new();
-        for (i, linter) in linters.iter().enumerate() {
-            let applies = languages[i].is_empty()
-                || languages[i].iter().any(|l| l == doc.language_id());
-            if !applies {
-                continue;
-            }
-            violations.extend(linter.lint_merged_in(info, text, &per_config[i]));
+/// Groups the tree's scope regions per config, remapping global scope
+/// indices to each config's local ones.
+fn per_config_segments(
+    doc: &Document<Ctx>,
+    config_count: usize,
+    owners: &[(usize, usize)],
+) -> Vec<Vec<(usize, declint_core::Span)>> {
+    let mut per_config = vec![Vec::new(); config_count];
+    for (global, span) in tree_segments(doc) {
+        if let Some(&(config, local)) = owners.get(global) {
+            per_config[config].push((local, span));
         }
-        violations.sort();
-        violations
-            .iter()
-            .map(|violation| diagnostic(doc, violation))
-            .collect()
-    }))
+    }
+    per_config
+}
+
+fn applies(languages: &[String], language_id: &str) -> bool {
+    languages.is_empty() || languages.iter().any(|l| l == language_id)
 }
 
 /// Runs an declint language server on stdio until the client sends
@@ -418,5 +486,84 @@ rules:
         assert_eq!(code, "loud-todo");
         assert_eq!(diags[0].message, "loud TODO with 2 bangs");
         assert_eq!(diags[0].range.start.line, 1);
+    }
+}
+
+#[cfg(test)]
+mod code_action_tests {
+    use super::*;
+    use declint_core::{Callbacks, Config};
+    use increparse::{CancelToken, SerialExecutor};
+    use increparse_lsp::PositionEncoding;
+    use lsp_types::Uri;
+
+    const YAML: &str = "\
+version: 1
+languages: [ini]
+rules:
+  - id: double-space
+    pattern: '(?m)== '
+    message: 'double space after =='
+    severity: warning
+    fix: '= '
+";
+
+    fn doc_with(text: &str) -> Document<Ctx> {
+        let uri: Uri = "file:///a.ini".parse().unwrap();
+        let mut doc = Document::open(uri, 0, "ini".into(), text.into(), PositionEncoding::Utf16, Ctx::Root);
+        let lang = language(
+            ConfigSet::single(Config::from_str(YAML).unwrap()),
+            &Callbacks::new(),
+        )
+        .unwrap();
+        doc.apply_changes(lang.engine(), 0, &[], &SerialExecutor, &CancelToken::new());
+        doc
+    }
+
+    #[test]
+    fn quickfix_offers_the_fix_template() {
+        let lang = language(
+            ConfigSet::single(Config::from_str(YAML).unwrap()),
+            &Callbacks::new(),
+        )
+        .unwrap();
+        let doc = doc_with("x ==  1\n");
+        let range = lsp_types::Range {
+            start: lsp_types::Position { line: 0, character: 0 },
+            end: lsp_types::Position { line: 0, character: 8 },
+        };
+        let actions = Language::code_action(&lang, &doc, range);
+        assert_eq!(actions.len(), 1);
+        assert!(actions[0].title.contains("double-space"));
+        let text_edits: Vec<&lsp_types::TextEdit> = actions[0]
+            .edit
+            .as_ref()
+            .and_then(|e| e.changes.as_ref())
+            .map(|changes| changes.values().flatten().collect())
+            .unwrap();
+        assert_eq!(text_edits[0].new_text, "= ");
+    }
+
+    #[test]
+    fn actions_outside_the_range_are_not_offered() {
+        let lang = language(
+            ConfigSet::single(Config::from_str(YAML).unwrap()),
+            &Callbacks::new(),
+        )
+        .unwrap();
+        let doc = doc_with("x ==  1\nsecond ==  2\n");
+        let range = lsp_types::Range {
+            start: lsp_types::Position { line: 1, character: 0 },
+            end: lsp_types::Position { line: 1, character: 14 },
+        };
+        let actions = Language::code_action(&lang, &doc, range);
+        assert_eq!(actions.len(), 1, "only the second line's fix");
+        assert!(
+            actions[0].edit.as_ref().unwrap().changes.as_ref().unwrap().values().next().unwrap()[0]
+                .range
+                .start
+                .line
+                == 1
+        );
     }
 }

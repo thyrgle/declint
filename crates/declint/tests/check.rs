@@ -507,3 +507,61 @@ fn json_format_emits_parseable_violation_objects() {
     assert_eq!(items[0]["message"], "no sudo");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn fix_flag_applies_fixes_in_place() {
+    let dir = std::env::temp_dir().join(format!("ezlint-fix-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    write(
+        &dir.join(".declint.yaml"),
+        "version: 1\nrules:\n  - id: compare-to-none\n    pattern: '==\\s*None'\n    message: \"use 'is None'\"\n    severity: warning\n    fix: 'is None'\n  - id: no-wildcard\n    pattern: 'import \\\\*'\n    message: 'wildcard import'\n    severity: error\n",
+    );
+    write(&dir.join("a.py"), "if x == None:\n    import *\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["check", "--fix", "a.py"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert_eq!(output.status.code(), Some(1), "{stdout}{stderr}");
+    assert!(stdout.contains("fixed 1 violation(s)"), "{stdout}");
+    // The fixable crime is repaired in place; the wildcard import remains.
+    let fixed = std::fs::read_to_string(dir.join("a.py")).unwrap();
+    assert_eq!(fixed, "if x is None:\n    import *\n");
+    assert!(stdout.contains("no-wildcard"), "{stdout}");
+    assert!(stderr.contains("1 violation(s)"), "{stderr}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn install_list_and_remove() {
+    let dir = std::env::temp_dir().join(format!("ezlint-ilst-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    write(&dir.join(".declint.yaml"), "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n");
+    // Vendor a package by hand, as an install would.
+    let vendored = dir.join(".declint/vendor/thyrgle/rules/HEAD");
+    std::fs::create_dir_all(&vendored).unwrap();
+    std::fs::write(vendored.join("declint.yaml"), "version: 1\nrules:\n  - id: v\n    pattern: y\n    message: m\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["install", "--list"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(stdout.contains("vendor"), "{stdout}");
+    assert!(stdout.contains("declint.yaml"), "{stdout}");
+
+    // Remove it: the vendored tree disappears.
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["remove", "thyrgle/rules"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(stdout.contains("removed"), "{stdout}");
+    assert!(!dir.join(".declint/vendor/thyrgle/rules").exists());
+    std::fs::remove_dir_all(&dir).unwrap();
+}

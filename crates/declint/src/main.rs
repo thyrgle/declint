@@ -60,6 +60,10 @@ enum Command {
         /// it are still reported, but no longer fail the run.
         #[arg(long, value_enum, default_value_t = FailOn::Hint)]
         fail_on: FailOn,
+        /// Apply available fixes in place instead of just reporting.
+        /// Exit 1 only for violations that remain after fixing.
+        #[arg(long)]
+        fix: bool,
         /// Files to lint. Directories are walked recursively
         /// (respecting .gitignore); files that are not valid UTF-8 are
         /// skipped.
@@ -106,8 +110,23 @@ enum Command {
         /// this project's .declint/vendor/.
         #[arg(short = 'g', long)]
         global: bool,
-        /// The source: gh:<owner>/<repo>[@<ref>][/subpath]
-        source: String,
+        /// List installed packages (project vendor tree and global
+        /// store) instead of installing.
+        #[arg(long)]
+        list: bool,
+        /// The source: gh:<owner>/<repo>[@<ref>][/subpath]; omitted
+        /// with --list.
+        source: Option<String>,
+    },
+    /// Remove an installed ruleset.
+    Remove {
+        /// Remove from the global store instead of the project's
+        /// .declint/vendor/.
+        #[arg(short = 'g', long)]
+        global: bool,
+        /// The package: <owner>/<repo> (or <owner>/<repo>@<ref> for
+        /// project installs).
+        package: String,
     },
     /// Print a shell completion script (bash, zsh, fish, or powershell).
     Completions {
@@ -151,6 +170,32 @@ impl FailOn {
             Self::Error => declint_core::Severity::Error,
         }
     }
+}
+
+/// Applies non-overlapping violation fixes to `source`, returning the
+/// fixed content and how many fixes were applied. Fixes are applied in
+/// position order; any fix that overlaps an applied one is skipped.
+fn apply_fixes(source: &str, violations: &[Violation]) -> (String, usize) {
+    let mut fixes: Vec<(usize, usize, &str)> = violations
+        .iter()
+        .filter_map(|v| v.fix.as_ref().map(|f| (v.span.start, v.span.end, f.as_str())))
+        .collect();
+    fixes.sort_by_key(|(start, end, _)| (*start, *end));
+
+    let mut out = String::with_capacity(source.len());
+    let mut pos = 0usize;
+    let mut applied = 0usize;
+    for (start, end, replacement) in fixes {
+        if start < pos || end < start {
+            continue;
+        }
+        out.push_str(&source[pos..start]);
+        out.push_str(replacement);
+        pos = end;
+        applied += 1;
+    }
+    out.push_str(&source[pos.min(source.len())..]);
+    (out, applied)
 }
 
 fn load_set(config: Option<&PathBuf>) -> ConfigSet {
@@ -227,6 +272,7 @@ fn check(
     language: Option<&String>,
     format: OutputFormat,
     fail_on: FailOn,
+    fix: bool,
     files: &[PathBuf],
 ) -> ExitCode {
     let set = load_set(config);
@@ -276,6 +322,32 @@ fn check(
             violations.extend(linters[i].lint_all_in(info, &source));
         }
         violations.sort();
+
+        let mut source = source;
+        if fix {
+            let (fixed_source, applied) = apply_fixes(&source, &violations);
+            if applied > 0 {
+                if let Err(e) = std::fs::write(&path, &fixed_source) {
+                    eprintln!("declint: cannot write {}: {e}", path.display());
+                    unreadable += 1;
+                    continue;
+                }
+                println!("fixed {applied} violation(s) in {}", path.display());
+            }
+            // What remains after fixing is what fails — re-lint the
+            // fixed content.
+            let mut remaining = Vec::new();
+            for (i, named) in set.configs().iter().enumerate() {
+                if !named.config.matches_language(detected.unwrap_or("")) {
+                    continue;
+                }
+                remaining.extend(linters[i].lint_all_in(info, &fixed_source));
+            }
+            remaining.sort();
+            violations = remaining;
+            source = fixed_source;
+        }
+
         match format {
             OutputFormat::Text => print_text(&path, &source, &violations),
             OutputFormat::Github => print_github(&path, &source, &violations),
@@ -652,6 +724,43 @@ fn explain(
     ExitCode::SUCCESS
 }
 
+fn install_list(global: bool) -> ExitCode {
+    let mut found = 0usize;
+    if !global {
+        let vendor = std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(".declint/vendor");
+        if vendor.is_dir() {
+            println!("project (.declint/vendor):");
+            for entry in ignore::Walk::new(&vendor).flatten() {
+                if entry.file_type().is_some_and(|t| t.is_file()) {
+                    println!("  {}", entry.path().display());
+                    found += 1;
+                }
+            }
+        } else {
+            println!("project (.declint/vendor): nothing installed");
+        }
+    }
+    if let Some(store) = declint_core::store::global_store_dir() {
+        println!("global ({}):", store.display());
+        if store.is_dir() {
+            for entry in ignore::Walk::new(&store).flatten() {
+                if entry.file_type().is_some_and(|t| t.is_file()) {
+                    println!("  {}", entry.path().display());
+                    found += 1;
+                }
+            }
+        } else {
+            println!("  nothing installed");
+        }
+    }
+    if found == 0 {
+        println!("declint: nothing installed — try `declint install gh:<owner>/<repo>`");
+    }
+    ExitCode::SUCCESS
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
@@ -671,8 +780,16 @@ fn main() -> ExitCode {
             language,
             format,
             fail_on,
+            fix,
             files,
-        } => check(config.as_ref(), language.as_ref(), format, fail_on, &files),
+        } => check(
+            config.as_ref(),
+            language.as_ref(),
+            format,
+            fail_on,
+            fix,
+            &files,
+        ),
         Command::Presets { name } => presets(name.as_ref()),
         Command::Init { lang } => init(lang.as_ref()),
         Command::Test { config, rules } => run_tests(config.as_ref(), &rules),
@@ -681,7 +798,14 @@ fn main() -> ExitCode {
             language,
             file,
         } => explain(config.as_ref(), language.as_ref(), &file),
-        Command::Install { global, source } => {
+        Command::Install { global, list, source } => {
+            if list {
+                return install_list(global);
+            }
+            let Some(source) = source else {
+                eprintln!("declint: install needs a source (gh:<owner>/<repo>) or --list");
+                return ExitCode::from(2);
+            };
             let parsed = match install::parse_gh_source(&source) {
                 Ok(parsed) => parsed,
                 Err(e) => {
@@ -751,6 +875,39 @@ fn main() -> ExitCode {
                 }
             }
             ExitCode::SUCCESS
+        }
+        Command::Remove { global, package } => {
+            let target = if global {
+                declint_core::store::global_store_dir()
+                    .map(|store| store.join(&package))
+            } else {
+                std::env::current_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .join(".declint/vendor")
+                    .join(&package)
+                    .into()
+            };
+            let Some(target) = target else {
+                eprintln!("declint: cannot locate a global store (no HOME directory)");
+                return ExitCode::from(2);
+            };
+            if !target.exists() {
+                eprintln!("declint: `{package}` is not installed at {}", target.display());
+                return ExitCode::from(2);
+            }
+            match std::fs::remove_dir_all(&target) {
+                Ok(()) => {
+                    println!("removed {}", target.display());
+                    if !global {
+                        println!("remember to remove its import line from your config");
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("declint: cannot remove {}: {e}", target.display());
+                    ExitCode::from(2)
+                }
+            }
         }
         Command::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "declint", &mut std::io::stdout());

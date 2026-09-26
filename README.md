@@ -366,6 +366,41 @@ it ever executes.
 `declint install` requires network access; linting the vendored copy
 does not.
 
+### Inline suppressions
+
+Put `declint:disable` in a line to silence every rule on that line, or
+`declint:disable=no-tabs,trailing-whitespace` to silence specific rules —
+in whatever comment syntax the language uses:
+
+```ini
+port = 99999 ; declint:disable=port-range
+password = hunter2 # declint:disable-next-line
+```
+
+`declint:disable-next-line` covers the following line instead. The
+suppression applies to the line's violations only — nothing global, and
+the markers work in any language because they are matched as plain text.
+
+### Fixes
+
+Rules with a `fix:` template are auto-repairable: the template replaces
+each match, interpolating captures like messages.
+
+```yaml
+rules:
+  - id: compare-to-none
+    pattern: '==\s*None'
+    message: "use 'is None', not '== None'"
+    fix: 'is None'
+```
+
+* **In CI and the terminal:** `declint check --fix` applies every
+  available fix in place (non-overlapping, position-ordered) and fails
+  only for the violations that remain.
+* **In the editor:** rules with fixes become quickfix code actions —
+  the lightbulb offers "declint: apply fix for …" on the offending
+  lines.
+
 ## Continuous integration
 
 `declint check` is CI-shaped: `file:line:col: severity[id]: message`
