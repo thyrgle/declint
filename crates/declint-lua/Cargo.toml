@@ -1,6 +1,6 @@
 [package]
 name = "declint-lua"
-version = "0.7.1"
+version = "0.8.0"
 edition = "2021"
 description = "Lua match callbacks for declint: inline snippets and .lua files, compiled and sandboxed."
 license = "MIT OR Apache-2.0"
@@ -10,5 +10,5 @@ keywords = ["lint", "lua", "callback", "sandbox"]
 categories = ["development-tools"]
 
 [dependencies]
-declint-core = { path = "../declint-core", version = "0.7.1" }
+declint-core = { path = "../declint-core", version = "0.8.0" }
 mlua = { version = "0.12", features = ["lua54", "send", "vendored"] }

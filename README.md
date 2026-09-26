@@ -306,6 +306,38 @@ function scopes), `ini` (tabs, trailing whitespace, empty values, a
 `[server]` scope example), `markdown` (tabs, trailing whitespace, bare
 URLs).
 
+## Sharing rulesets
+
+Rule sets are plain YAML configs in git repos — anyone's repo can be a
+ruleset. To use one:
+
+```console
+$ declint install gh:thyrgle/declint-rules
+vendored .declint/vendor/thyrgle/declint-rules/HEAD/declint.yaml
+wired into .declint.yaml
+```
+
+* **Project installs** vendor the files under
+  `.declint/vendor/<owner>/<repo>/<ref>/` and wire the import into your
+  config. The files are ordinary repo content: review them in the PR,
+  commit them, and CI never touches the network — same commit, same
+  lints, forever. Pin with `@<tag-or-sha>` for extra precision
+  (unpinned installs print a warning).
+* **Global installs** (`declint install -g gh:owner/repo`) vendor into
+  `~/.declint/store/` instead, for personal rules available everywhere.
+  Import them from any config with `import: [global:owner/repo]`.
+  Global installs float — re-running install updates them — so prefer
+  project installs for anything shared or audited.
+
+The fetched config's own relative `import:` entries are fetched too, so
+multi-file rule sets work. And the trust note, plainly: **rulesets may
+contain Lua callbacks and parsers** — installing one is running code.
+Vendor-first exists so you read exactly what runs, exactly once, before
+it ever executes.
+
+`declint install` requires network access; linting the vendored copy
+does not.
+
 ## Continuous integration
 
 `declint check` is CI-shaped: `file:line:col: severity[id]: message`
@@ -340,7 +372,7 @@ jobs:
       - uses: thyrgle/declint@v0        # the composite action in this repo
         with:
           path: .
-          declint-version: "0.7.1"
+          declint-version: "0.8.0"
 ```
 
 **Or by hand**, without the action:
@@ -405,7 +437,7 @@ filter, style, and (later) suppress per rule.
 
 ## Status
 
-0.7.1 — Lua print() routes to stderr, CRLF-safe scope boundaries, --fail-on severity thresholds, shell completions. 0.7.0 — imports & presets (preset:python/ini/markdown, declint init, declint presets), Lua parser rules (whole-file matchers for duplicates, absence
+0.8.0 — declint install (gh: rulesets vendored into the project or the global store, importable as global:<pkg>). 0.7.1 — Lua print() routes to stderr, CRLF-safe scope boundaries, --fail-on severity thresholds, shell completions. 0.7.0 — imports & presets (preset:python/ini/markdown, declint init, declint presets), Lua parser rules (whole-file matchers for duplicates, absence
 rules, and custom matching), Lua match callbacks, hidden configs with
 directory discovery, per-language configs, scoped rules; the schema is
 versioned to keep future configs compatible.

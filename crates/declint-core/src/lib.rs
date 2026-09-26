@@ -62,6 +62,10 @@
 
 mod callback;
 mod config;
+/// The global ruleset store: packages installed with
+/// `declint install -g`, resolved by `import: global:<pkg>`.
+pub mod store;
+
 /// The embedded preset library: curated config fragments importable as
 /// `import: preset:<name>`.
 pub mod presets;

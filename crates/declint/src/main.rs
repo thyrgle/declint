@@ -17,6 +17,8 @@ use std::process::ExitCode;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use declint_core::{language_from_extension, ConfigSet, Violation};
 
+mod install;
+
 #[derive(Parser)]
 #[command(
     name = "declint",
@@ -74,6 +76,15 @@ enum Command {
         /// imports it and pins the language.
         #[arg(long)]
         lang: Option<String>,
+    },
+    /// Install a ruleset from GitHub (vendored, reviewed, committed).
+    Install {
+        /// Install into the global store (~/.declint/store) instead of
+        /// this project's .declint/vendor/.
+        #[arg(short = 'g', long)]
+        global: bool,
+        /// The source: gh:<owner>/<repo>[@<ref>][/subpath]
+        source: String,
     },
     /// Print a shell completion script (bash, zsh, fish, or powershell).
     Completions {
@@ -379,6 +390,77 @@ fn main() -> ExitCode {
         } => check(config.as_ref(), language.as_ref(), format, fail_on, &files),
         Command::Presets { name } => presets(name.as_ref()),
         Command::Init { lang } => init(lang.as_ref()),
+        Command::Install { global, source } => {
+            let parsed = match install::parse_gh_source(&source) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    eprintln!("declint: {e}");
+                    return ExitCode::from(2);
+                }
+            };
+            let destination = if global {
+                install::Destination::Global
+            } else {
+                install::Destination::Project {
+                    root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+                }
+            };
+            let outcome = match install::run(&install::HttpFetcher, &parsed, &destination) {
+                Ok(outcome) => outcome,
+                Err(e) => {
+                    eprintln!("declint: {e}");
+                    return ExitCode::from(2);
+                }
+            };
+            if outcome.floating_reference {
+                eprintln!(
+                    "declint: installed without a pinned ref — re-run with @<tag-or-sha> \
+                     to pin"
+                );
+            }
+            for file in &outcome.files {
+                println!("vendored {}", file.display());
+            }
+            if global {
+                println!("import with: import: [{}]", outcome.import_entry);
+                return ExitCode::SUCCESS;
+            }
+
+            // Project mode: try to wire the import into the active
+            // config automatically.
+            match ConfigSet::discover(
+                &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            ) {
+                Ok(set) if !set.configs().is_empty() => {
+                    let config_path = set.configs()[0].path.clone();
+                    let text = std::fs::read_to_string(&config_path).unwrap_or_default();
+                    let relative = install::import_relative(&config_path, &outcome.entry_file);
+                    match install::wire_import(&text, &relative) {
+                        Some(updated) => {
+                            if let Err(e) = std::fs::write(&config_path, updated) {
+                                eprintln!("declint: cannot update {}: {e}", config_path.display());
+                                return ExitCode::from(2);
+                            }
+                            println!("wired into {}", config_path.display());
+                        }
+                        None => {
+                            println!(
+                                "add to {}: import: [{}]",
+                                config_path.display(),
+                                relative
+                            );
+                        }
+                    }
+                }
+                _ => {
+                    println!(
+                        "no config found — add to a new .declint.yaml: import: [{}]",
+                        outcome.import_entry
+                    );
+                }
+            }
+            ExitCode::SUCCESS
+        }
         Command::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "declint", &mut std::io::stdout());
             ExitCode::SUCCESS

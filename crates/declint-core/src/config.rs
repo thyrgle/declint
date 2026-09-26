@@ -29,6 +29,9 @@ pub(crate) enum ImportSource {
     Preset(String),
     /// A path ending in `.yaml`/`.yml`, relative to the importing file.
     File(String),
+    /// `global:<owner>/<repo>` — a package from the global store
+    /// (`declint install -g`).
+    Global(String),
 }
 
 impl ImportSource {
@@ -36,6 +39,7 @@ impl ImportSource {
     fn as_written(&self) -> String {
         match self {
             Self::Preset(name) => format!("preset:{name}"),
+            Self::Global(pkg) => format!("global:{pkg}"),
             Self::File(path) => path.clone(),
         }
     }
@@ -43,6 +47,18 @@ impl ImportSource {
 
 /// Classifies an `import:` entry.
 pub(crate) fn classify_import(entry: &str) -> Result<ImportSource, String> {
+    if let Some(source) = entry.strip_prefix("gh:") {
+        return Err(format!(
+            "gh: sources are installed, not imported — run `declint install -g gh:{source}` \
+             (or without -g to vendor into this project)"
+        ));
+    }
+    if let Some(pkg) = entry.strip_prefix("global:") {
+        if pkg.is_empty() {
+            return Err("global imports need a package (`global:owner/repo`)".into());
+        }
+        return Ok(ImportSource::Global(pkg.to_string()));
+    }
     if let Some(name) = entry.strip_prefix("preset:") {
         if name.is_empty() {
             return Err("preset imports need a name (`preset:python`)".into());
@@ -52,7 +68,8 @@ pub(crate) fn classify_import(entry: &str) -> Result<ImportSource, String> {
         Ok(ImportSource::File(entry.to_string()))
     } else {
         Err(
-            "import entries must be `preset:<name>` or a path ending in `.yaml`/`.yml`"
+            "import entries must be `preset:<name>`, `global:<pkg>`, or a path ending in \
+             `.yaml`/`.yml`"
                 .into(),
         )
     }
@@ -311,6 +328,48 @@ impl Config {
                         &mut scopes,
                     )?;
                 }
+                ImportSource::Global(pkg) => {
+                    let Some(entry_path) = crate::store::lookup_global(pkg) else {
+                        return Err(ConfigError::new(format!(
+                            "package `{pkg}` is not installed globally — run \
+                             `declint install -g gh:<owner>/<repo>`"
+                        ))
+                        .at_import(entry_text, origin));
+                    };
+                    let child_yaml = std::fs::read_to_string(&entry_path).map_err(|e| {
+                        ConfigError::new(format!(
+                            "cannot read global package `{pkg}`: {e}"
+                        ))
+                        .at_import(entry_text, origin)
+                    })?;
+                    let canonical = entry_path.canonicalize().map_err(|e| {
+                        ConfigError::new(format!(
+                            "cannot resolve global package `{pkg}`: {e}"
+                        ))
+                        .at_import(entry_text, origin)
+                    })?;
+                    let child_origin = format!("global:{pkg}");
+                    let child = Self::resolve(
+                        &child_yaml,
+                        Some(
+                            entry_path
+                                .parent()
+                                .unwrap_or(Path::new(".")),
+                        ),
+                        &child_origin,
+                        &canonical.display().to_string(),
+                        stack,
+                    )
+                    .map_err(|e| in_import(entry_text, e))?;
+                    Self::absorb(
+                        &child,
+                        &child_origin,
+                        entry_text,
+                        origin,
+                        &mut rules,
+                        &mut scopes,
+                    )?;
+                }
                 ImportSource::File(relative) => {
                     let Some(base) = base else {
                         return Err(ConfigError::new(
@@ -553,6 +612,7 @@ impl Config {
                 .iter()
                 .map(|source| match source {
                     ImportSource::Preset(name) => format!("preset:{name}"),
+                    ImportSource::Global(pkg) => format!("global:{pkg}"),
                     ImportSource::File(path) => path.clone(),
                 })
                 .collect(),

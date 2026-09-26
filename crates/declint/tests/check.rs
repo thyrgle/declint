@@ -390,3 +390,26 @@ fn fail_on_threshold_controls_the_exit_code_but_not_the_output() {
     assert!(stderr.contains("all below the --fail-on threshold"), "{stderr}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn gh_imports_in_configs_are_rejected_with_an_install_hint() {
+    let dir = std::env::temp_dir().join(format!("ezlint-ghimp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    write(
+        &dir.join(".declint.yaml"),
+        "version: 1\nimport:\n  - gh:thyrgle/rules\nrules:\n  - id: r\n    pattern: x\n    message: m\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+        .args(["check", "x.txt"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr.contains("gh: sources are installed, not imported"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("declint install"), "{stderr}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
