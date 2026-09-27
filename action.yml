@@ -1,4 +1,4 @@
-name: "declint-ci"
+name: "declint"
 description: "Run declint checks and annotate the pull request"
 branding:
   icon: "check-circle"
