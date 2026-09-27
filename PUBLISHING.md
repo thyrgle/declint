@@ -41,16 +41,25 @@ order. This document is the runbook.
    cargo publish -p declint
    ```
 
-5. Tag and push:
+5. Tag and push (the README's `uses: thyrgle/declint@v1.0.0` example
+   resolves against this tag; a moving `v0` major tag is a nice extra):
 
    ```sh
-   git tag v0.6.0 && git push origin v0.6.0
+   git tag v1.0.0 && git push origin v1.0.0
+   git tag -f v0 && git push origin v0 --force
    ```
 
 6. Update the composite `action.yml` default `declint-version` input to
    the new release.
 
 ## Notes
+
+- The GitHub Marketplace listing is **optional** — `uses:
+  thyrgle/declint@<tag>` works from any repo with `action.yml` at its
+  root, no listing needed. If you ever want the storefront, the
+  marketplace display name must be unique across the marketplace
+  ("declint" is taken there; "declint-ci" was the earlier idea) — that
+  only changes the listing name, never the `uses:` reference.
 
 - `declint-lua` vendors Lua C sources via mlua's `vendored` feature, so
   publishing needs no system Lua, but *building* it requires a C
