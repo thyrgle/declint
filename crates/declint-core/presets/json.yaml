@@ -1,0 +1,62 @@
+# declint preset: JSON
+#
+# A curated starter ruleset for JSON. Import it:
+#
+#   import:
+#     - preset:json
+#
+# Assumes pretty-printed JSON (one key per line). Single-line minified
+# files will over-report on some rules.
+
+version: 1
+
+rules:
+  # Trailing commas are the most common JSON syntax error.
+  - id: trailing-comma
+    pattern: ',\s*[}\]]'
+    message: "trailing comma — JSON does not allow one before } or ]"
+    severity: error
+    tests:
+      - name: trailing comma is flagged
+        text: "{ \"a\": 1, }\n"
+        violations: 1
+      - name: normal comma passes
+        text: "{ \"a\": 1, \"b\": 2 }\n"
+        violations: 0
+
+  - id: single-quoted-string
+    pattern: "'[^']*'\\s*:"
+    message: "JSON requires double-quoted keys"
+    severity: error
+    tests:
+      - name: single-quoted key is flagged
+        text: "{ 'a': 1 }\n"
+        violations: 1
+      - name: double-quoted key passes
+        text: "{ \"a\": 1 }\n"
+        violations: 0
+
+  - id: unquoted-key
+    pattern: '(?m)^\s*[A-Za-z_]\w*\s*:'
+    message: "JSON keys must be double-quoted strings"
+    severity: error
+    tests:
+      - name: unquoted key is flagged
+        text: "{ a: 1 }\n"
+        violations: 1
+      - name: quoted key passes
+        text: "{ \"a\": 1 }\n"
+        violations: 0
+
+  # JSON has no comment syntax — these lines are syntax errors.
+  - id: json-comments
+    pattern: '//'
+    message: "JSON has no comments — remove or move to documentation"
+    severity: error
+    tests:
+      - name: comment is flagged
+        text: "{ \"a\": 1 } // note\n"
+        violations: 1
+      - name: comment-free file passes
+        text: "{ \"a\": 1 }\n"
+        violations: 0

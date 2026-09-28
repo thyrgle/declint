@@ -1,0 +1,87 @@
+# declint preset: Shell
+#
+# A curated starter ruleset for shell scripts. Import it:
+#
+#   import:
+#     - preset:sh
+
+version: 1
+
+rules:
+  # `rm` that touches a variable: the classic footgun. Quote and guard.
+  - id: rm-with-variable
+    pattern: '(?i)\brm\b[^\n]*\$'
+    message: "rm touching a variable — quote it and double-check the path"
+    severity: warning
+    tests:
+      - name: rm with a variable is flagged
+        text: "rm -rf $TARGET\n"
+        violations: 1
+      - name: plain rm passes
+        text: "rm temp.txt\n"
+        violations: 0
+
+  - id: no-sudo
+    pattern: '\bsudo\b'
+    message: "sudo in a script — escalate deliberately, not implicitly"
+    severity: warning
+    tests:
+      - name: sudo is flagged
+        text: "sudo rm x\n"
+        violations: 1
+      - name: no sudo passes
+        text: "rm x\n"
+        violations: 0
+
+  # `[ ... == ... ]` is string comparison in test; == is a bashism and
+  # a common typo for =.
+  - id: bracket-double-equals
+    pattern: '\[\s+\S+\s+=='
+    message: "use = inside [ ] (or switch to [[ ]])"
+    severity: warning
+    tests:
+      - name: == inside brackets is flagged
+        text: "if [ $x == 1 ]; then echo hi; fi\n"
+        violations: 1
+      - name: = inside brackets passes
+        text: "if [ $x = 1 ]; then echo hi; fi\n"
+        violations: 0
+
+  # Absence rule (parser): a script without a shebang line.
+  - id: missing-shebang
+    parser: |
+      return function(text, offset)
+        local first = text:match('^[^\n]*')
+        if first:sub(1, 2) == '#!' then
+          return nil
+        end
+        return { { start = offset, finish = offset + #first, captures = { line = first } } }
+      end
+    message: "no shebang line — interpreters and kernels need one"
+    severity: warning
+    tests:
+      - name: missing shebang is flagged
+        text: "echo hi\n"
+        violations: 1
+      - name: shebang present passes
+        text: "#!/usr/bin/env bash\necho hi\n"
+        violations: 0
+
+  # Gentle opinion (info): fail early instead of mid-pipeline.
+  - id: set-strict-mode
+    parser: |
+      return function(text, offset)
+        if text:find('set%s+%-[euo]') then
+          return nil
+        end
+        return { { start = 0, finish = 1 } }
+      end
+    message: "consider 'set -euo pipefail' to fail early"
+    severity: info
+    tests:
+      - name: strict mode passes
+        text: "set -euo pipefail\necho hi\n"
+        violations: 0
+      - name: without strict mode is suggested
+        text: "echo hi\n"
+        violations: 1

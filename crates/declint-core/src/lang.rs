@@ -8,6 +8,30 @@
 
 use std::path::Path;
 
+/// The language id for well-known extension-less filenames
+/// (`Dockerfile`, `Containerfile`), matched on the file's basename.
+fn language_from_filename(path: &Path) -> Option<String> {
+    let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+    // Suffixed variants (`Dockerfile.web`, `Containerfile.prod`) count
+    // as the same language.
+    let language = if name == "dockerfile" || name.starts_with("dockerfile.")
+        || name == "containerfile" || name.starts_with("containerfile.")
+    {
+        "dockerfile"
+    } else if name == "makefile" || name == "gnumakefile" {
+        "make"
+    } else {
+        return None;
+    };
+    Some(language.to_string())
+}
+
+/// The language id for a path: well-known extension-less filenames
+/// first (`Dockerfile`), then the extension.
+pub fn language_from_path(path: &Path) -> Option<String> {
+    language_from_filename(path).or_else(|| language_from_extension(path))
+}
+
 /// The language id for `path`'s extension, or `None` when unknown.
 pub fn language_from_extension(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
@@ -85,5 +109,35 @@ mod tests {
         assert_eq!(lang("Makefile"), None);
         assert_eq!(lang("data.bin"), None);
         assert_eq!(lang("no_extension"), None);
+    }
+}
+
+#[cfg(test)]
+mod filename_tests {
+    use super::*;
+
+    #[test]
+    fn extensionless_filenames() {
+        assert_eq!(
+            language_from_path(Path::new("docker/Dockerfile")).as_deref(),
+            Some("dockerfile")
+        );
+        assert_eq!(
+            language_from_path(Path::new("deploy/Containerfile.prod")).as_deref(),
+            Some("dockerfile")
+        );
+        assert_eq!(
+            language_from_path(Path::new("Makefile")).as_deref(),
+            Some("make")
+        );
+        assert_eq!(language_from_path(Path::new("src/main.rs")).as_deref(), Some("rust"));
+    }
+
+    #[test]
+    fn case_insensitive_names() {
+        assert_eq!(
+            language_from_path(Path::new("docker/dockerfile")).as_deref(),
+            Some("dockerfile")
+        );
     }
 }

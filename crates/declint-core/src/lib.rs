@@ -81,7 +81,7 @@ pub use callback::{
 };
 pub use config::{Config, ConfigError, Rule, RuleTest, Scope, SUPPORTED_VERSION};
 pub use config_set::{ConfigSet, NamedConfig, ScopeEntry, CONFIG_DIR, CONFIG_FILE, LEGACY_CONFIG_FILE};
-pub use lang::language_from_extension;
+pub use lang::{language_from_extension, language_from_path};
 pub use linter::{line_col, DocInfo, Linter, Span, Violation};
 pub use scopes::{segment, segment_all};
 pub use suppressions::Suppressions;

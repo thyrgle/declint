@@ -1,0 +1,61 @@
+# House rules: the rules other linters can't do.
+#
+# These are PROJECT conventions, not universal style — that's why they
+# are not shipped as a preset. Copy them into your config and adapt
+# them to your house style.
+
+version: 1
+languages: [python]
+
+rules:
+  # Multi-tenancy house rule: every db.query() call must pass
+  # tenant_id=. A callback can veto matches that already comply —
+  # something a plain regex cannot express (no lookaround, and the
+  # condition is "does NOT contain").
+  #
+  # Approximation: single-line calls (the args capture stops at the
+  # first closing paren).
+  - id: query-needs-tenant
+    pattern: '\bdb\.query\((?<args>[^\n)]*)'
+    severity: error
+    callback: |
+      return function(c)
+        if c.captures.args:find("tenant_id") then
+          return nil  -- compliant: allowed
+        end
+        return { message = "db.query() must pass tenant_id= (multi-tenancy)" }
+      end
+    tests:
+      - name: compliant call passes
+        text: "db.query(tenant_id=t, sql=s)"
+        violations: 0
+      - name: missing tenant_id is flagged
+        text: "db.query(sql=s)"
+        violations: 1
+        messages: ["db.query() must pass tenant_id= (multi-tenancy)"]
+
+scopes:
+  # Convention-scoped rules: everything inside functions whose names
+  # start with handle_ is a request handler, and handlers follow
+  # stricter rules than the rest of the codebase. Stock linters cannot
+  # scope a rule by naming convention without a custom AST plugin.
+  - id: request-handler
+    start: '^(?:async )?def handle_\w+'
+    end: '^\S'
+    rules:
+      - id: no-print-in-handler
+        pattern: '\bprint\('
+        message: "handlers use the logger, not print"
+        severity: error
+        tests:
+          - name: print inside a handler is flagged
+            text: "def handle_get(req):\n    print(req)\n"
+            violations: 1
+            messages: ["handlers use the logger, not print"]
+          - name: print outside a handler passes
+            text: "def setup():\n    print(req)\n"
+            violations: 0
+      - id: no-bare-raise
+        pattern: '(?m)^\s*raise\s*$'
+        message: "handlers must raise ApiError, never re-raise bare"
+        severity: error

@@ -1,0 +1,97 @@
+# declint preset: TOML
+#
+# A curated starter ruleset for TOML files (Cargo.toml, pyproject.toml,
+# ...). Import it:
+#
+#   import:
+#     - preset:toml
+
+version: 1
+
+rules:
+  - id: no-tabs
+    pattern: '(?m)^\t+'
+    message: "Tab character — use spaces"
+    severity: warning
+    tests:
+      - name: tab indentation is flagged
+        text: "\tkey = 1"
+        violations: 1
+      - name: clean line passes
+        text: "key = 1"
+        violations: 0
+
+  - id: trailing-whitespace
+    pattern: '(?m)[ \t]+\r?$'
+    message: "Trailing whitespace"
+    severity: hint
+    tests:
+      - name: trailing spaces are flagged
+        text: "key = 1   "
+        violations: 1
+      - name: clean line passes
+        text: "key = 1\n"
+        violations: 0
+
+  - id: key-without-value
+    pattern: '(?m)^\s*[\w.-]+\s*=\s*$'
+    message: "key has no value"
+    severity: warning
+    tests:
+      - name: empty value is flagged
+        text: "key =\n"
+        violations: 1
+      - name: valued key passes
+        text: "key = 1\n"
+        violations: 0
+
+  - id: spacing-equals
+    pattern: '(?m)^\s*[\w."-]+=[^\s]'
+    message: "put spaces around the equals sign"
+    severity: hint
+    tests:
+      - name: cramped equals is suggested
+        text: "key=1\n"
+        violations: 1
+      - name: spaced equals passes
+        text: "key = 1\n"
+        violations: 0
+
+  # Parser rule: duplicate keys, tracked per section (the same key in
+  # different tables is valid TOML).
+  - id: duplicate-keys
+    parser: |
+      return function(text, offset)
+        local seen, matches = {}, {}
+        local pos, section = 1, ''
+        while pos <= #text do
+          local nl = text:find('\n', pos, true) or (#text + 1)
+          local line = text:sub(pos, nl - 1)
+          local sect = line:match('^%s*%[(.+)%]%s*$')
+          if sect then
+            section = sect
+          end
+          local key = line:match('^%s*([%w%-%.]+)%s*=')
+          if key then
+            local id = section .. '/' .. key
+            if seen[id] then
+              matches[#matches + 1] = {
+                start = offset + pos - 1, finish = offset + pos - 1 + #line,
+                captures = { key = key, section = section },
+              }
+            end
+            seen[id] = true
+          end
+          pos = nl + 1
+        end
+        return matches
+      end
+    message: "key '{key}' is defined twice in [{section}]"
+    severity: error
+    tests:
+      - name: duplicate key in the same section is flagged
+        text: "[package]\nname = 1\nname = 2\n"
+        violations: 1
+      - name: same key in different sections passes
+        text: "[a]\nname = 1\n[b]\nname = 2\n"
+        violations: 0

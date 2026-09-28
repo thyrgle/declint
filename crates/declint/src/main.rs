@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use declint_core::{language_from_extension, ConfigSet, Violation};
+use declint_core::{language_from_path, ConfigSet, Violation};
 
 mod install;
 
@@ -308,7 +308,7 @@ fn check(
                 continue;
             }
         };
-        let inferred = language_from_extension(&path);
+        let inferred = language_from_path(&path);
         let detected = language.map(String::as_str).or(inferred.as_deref());
         let info = declint_core::DocInfo {
             path: &path.display().to_string(),
@@ -612,7 +612,7 @@ fn explain(
             return ExitCode::from(2);
         }
     };
-    let inferred = language_from_extension(file);
+    let inferred = language_from_path(file);
     let detected = language.map(String::as_str).or(inferred.as_deref());
     println!(
         "file: {} (language: {})",

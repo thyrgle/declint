@@ -1,0 +1,100 @@
+# declint preset: Dockerfile
+#
+# A curated starter ruleset for Dockerfiles. Import it:
+#
+#   import:
+#     - preset:dockerfile
+
+version: 1
+
+rules:
+  # FROM without a tag — image is unpinned and non-reproducible.
+  - id: from-unpinned
+    pattern: '(?mi)^FROM\s+[^\s:]+\s*$'
+    message: "pin the image with a tag or digest"
+    severity: hint
+    tests:
+      - name: untagged FROM is suggested
+        text: "FROM alpine\n"
+        violations: 1
+      - name: tagged FROM passes
+        text: "FROM alpine:3.20\n"
+        violations: 0
+
+  - id: from-latest
+    pattern: '(?mi)^FROM\s+\S+:latest'
+    message: ":latest is not a pin — use a version tag or digest"
+    severity: warning
+    tests:
+      - name: latest tag is flagged
+        text: "FROM alpine:latest\n"
+        violations: 1
+      - name: pinned tag passes
+        text: "FROM alpine:3.20\n"
+        violations: 0
+
+  - id: no-sudo
+    pattern: '(?mi)^\s*RUN\b.*\bsudo\b'
+    message: "containers run as root by default — sudo is redundant"
+    severity: warning
+    tests:
+      - name: sudo in RUN is flagged
+        text: "FROM alpine:3.20\nRUN sudo apt install x\n"
+        violations: 1
+      - name: plain RUN passes
+        text: "FROM alpine:3.20\nRUN apt install x\n"
+        violations: 0
+
+  # ADD has magic (remote URLs, auto-extracting tars); COPY does one
+  # thing predictably.
+  - id: add-instead-of-copy
+    pattern: '(?mi)^ADD\s'
+    message: "prefer COPY — ADD has implicit magic"
+    severity: warning
+    tests:
+      - name: ADD is flagged
+        text: "ADD app.tar.gz /app\n"
+        violations: 1
+      - name: COPY passes
+        text: "COPY app /app\n"
+        violations: 0
+
+  # apt-get leaves the package index behind; clean it in the same RUN.
+  - id: apt-no-clean
+    pattern: '(?mi)^\s*RUN\b[^\n]*apt-get\s+install[^\n]*'
+    severity: warning
+    callback: |
+      return function(c)
+        if c.match_text:find("/var/lib/apt", 1, true) then
+          return nil
+        end
+        return { message = "clean the apt list in the same RUN (rm -rf /var/lib/apt/lists/*)" }
+      end
+    tests:
+      - name: apt install without cleanup is flagged
+        text: "RUN apt-get install -y curl\n"
+        violations: 1
+        messages: ["clean the apt list in the same RUN (rm -rf /var/lib/apt/lists/*)"]
+      - name: apt install with cleanup passes
+        text: "RUN apt-get install -y curl && rm -rf /var/lib/apt/lists/*\n"
+        violations: 0
+
+  # Absence rule (parser): no HEALTHCHECK anywhere in the file.
+  - id: missing-healthcheck
+    parser: |
+      return function(text, offset)
+        if text:find('HEALTHCHECK') then
+          return nil
+        end
+        local first = text:match('^[^\n]*')
+        return { { start = 0, finish = #first } }
+      end
+    message: "no HEALTHCHECK — orchestrators cannot tell if this container is alive"
+    severity: info
+    tests:
+      - name: missing healthcheck is suggested
+        text: "FROM alpine:3.20\nCMD [\"sh\"]\n"
+        violations: 1
+      - name: healthcheck present passes
+        text: "FROM alpine:3.20\nHEALTHCHECK CMD true\nCMD [\"sh\"]\n"
+        violations: 0

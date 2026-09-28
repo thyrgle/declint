@@ -750,9 +750,13 @@ mod import_tests {
             DocInfo { path: "app.py", language: "python" },
             source,
         );
-        // The print inside `async def go` is flagged; the top-level one is not.
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].rule_id, "print-in-function");
-        assert_eq!(v[0].span.to_range(), 20..26);
+        // Inside `async def go`: the missing-docstring absence rule
+        // fires on the def line, and the print is flagged. The
+        // top-level print on the last line is outside every region.
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].rule_id, "missing-docstring");
+        assert_eq!(v[0].span.to_range(), 0..15);
+        assert_eq!(v[1].rule_id, "print-in-function");
+        assert_eq!(v[1].span.to_range(), 20..26);
     }
 }

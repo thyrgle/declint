@@ -44,6 +44,35 @@ rules:
     message: "bare except catches everything — name the exception"
     severity: warning
 
+  - id: except-pass
+    pattern: '\bexcept\b[^:]*:\s*pass\b'
+    message: "swallowed exception — at least log it"
+    severity: warning
+    tests:
+      - name: except-pass is flagged
+        text: "try:\n    x\nexcept ValueError:\n    pass\n"
+        violations: 1
+      - name: logged exception passes
+        text: "try:\n    x\nexcept ValueError as e:\n    log(e)\n"
+        violations: 0
+
+  - id: open-without-with
+    pattern: '=\s*open\('
+    message: "open() without a with block leaks the handle"
+    severity: warning
+    tests:
+      - name: bare open() is flagged
+        text: "f = open(path)\n"
+        violations: 1
+      - name: with-open passes
+        text: "with open(path) as f:\n    pass\n"
+        violations: 0
+
+  - id: type-ignore
+    pattern: '#\s*type:\s*ignore'
+    message: "type: ignore — leave a comment saying why"
+    severity: info
+
   - id: compare-to-none
     pattern: '==\s*None\b'
     message: "use 'is None', not '== None'"
@@ -93,3 +122,42 @@ scopes:
           - name: top-level print is allowed
             text: "print(1)\n"
             violations: 0
+
+      # Absence rule (parser): a function region without a docstring.
+      # Delete this rule if docstrings are not your house style.
+      - id: missing-docstring
+        parser: |
+          return function(text, offset)
+            if text:find('"""') then
+              return nil
+            end
+            local first = text:match('^[^\n]*')
+            return { { start = offset, finish = offset + #first } }
+          end
+        message: "no docstring — say what this function does"
+        severity: info
+        tests:
+          - name: undocumented function is suggested
+            text: "def f():\n    pass\n"
+            violations: 1
+          - name: documented function passes
+            text: "def f():\n    \"\"\"Does a thing.\"\"\"\n"
+            violations: 0
+
+  # A top-level class, same region logic as functions — with the same
+  # docstring rule.
+  - id: class
+    start: '^class\s'
+    end: '^\S'
+    rules:
+      - id: missing-class-docstring
+        parser: |
+          return function(text, offset)
+            if text:find('"""') then
+              return nil
+            end
+            local first = text:match('^[^\n]*')
+            return { { start = offset, finish = offset + #first } }
+          end
+        message: "no docstring — say what this class does"
+        severity: info

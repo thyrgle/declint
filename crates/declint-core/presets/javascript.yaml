@@ -1,0 +1,51 @@
+# declint preset: JavaScript
+#
+# A curated starter ruleset — a taste of ESLint's classics in regex
+# form. Import it:
+#
+#   import:
+#     - preset:javascript
+
+version: 1
+
+rules:
+  # The no-lookaround workaround: `==` with a non-comparison character
+  # on each side, so ==, <=, >= and != all stay quiet.
+  - id: loose-equality
+    pattern: '[^=!<>]==[^=]'
+    message: "loose equality — use === (and !==)"
+    severity: warning
+    tests:
+      - name: == is flagged
+        text: "x == 1\n"
+        violations: 1
+      - name: === passes
+        text: "x === 1\n"
+        violations: 0
+      - name: <= passes
+        text: "x <= 1\n"
+        violations: 0
+
+  - id: var-declaration
+    pattern: '(?m)^\s*var\s'
+    message: "use let or const instead of var"
+    severity: warning
+    tests:
+      - name: var is flagged
+        text: "var x = 1\n"
+        violations: 1
+      - name: let passes
+        text: "let x = 1\n"
+        violations: 0
+
+  - id: console-log
+    pattern: '\bconsole\.log\('
+    message: "leftover console.log — remove or use the logger"
+    severity: info
+    tests:
+      - name: console.log is flagged
+        text: "console.log(x)\n"
+        violations: 1
+      - name: clean code passes
+        text: "logger.info(x)\n"
+        violations: 0

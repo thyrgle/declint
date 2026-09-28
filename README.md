@@ -329,10 +329,33 @@ rules:
   the YAML; `declint init --lang python` scaffolds a config that
   imports it.
 
-Shipped presets: `python` (PEP 8 warm-ups, mutable defaults, top-level
-function scopes), `ini` (tabs, trailing whitespace, empty values, a
-`[server]` scope example), `markdown` (tabs, trailing whitespace, bare
-URLs).
+Shipped presets: `python` (PEP 8 warm-ups, mutable defaults, docstrings,
+top-level function/class scopes), `ini` (tabs, trailing whitespace,
+empty values, duplicate keys, a `[server]` scope example), `markdown`
+(tabs, trailing whitespace, bare URLs), `sh` (rm-with-variables, sudo,
+missing shebang, strict-mode suggestion), `dockerfile` (unpinned/latest
+`FROM`, sudo in RUN, `ADD` vs `COPY`, apt cleanup, missing
+`HEALTHCHECK`), `toml` (tabs, trailing whitespace, empty values,
+spacing, duplicate keys per section), `json` (trailing commas,
+single-quoted strings, unquoted keys, comments), `javascript` (`==` vs
+`===`, `var` declarations, leftover `console.log`).
+
+### Rules other linters can't do
+
+Stock linters ship fixed catalogs of universal rules. declint's
+differentiator is the rules they will never ship — *your* conventions.
+Two examples from [`examples/house-rules/`](examples/house-rules/):
+
+* **A conditional house rule**: every `db.query()` call must pass
+  `tenant_id=` (multi-tenancy). A callback vetoes compliant calls —
+  no regex can express "flag it only when it does NOT contain".
+* **A convention-scoped rule**: a scope whose `start` pattern selects
+  functions *named* `handle_*`, so "handlers never print" applies only
+  inside request handlers and nowhere else. Stock linters cannot scope
+  a rule by naming convention without a custom AST plugin.
+
+Both are a dozen lines of YAML. See `examples/house-rules/` for the
+working setup.
 
 ## Sharing rulesets
 
