@@ -1,6 +1,6 @@
 [package]
 name = "declint"
-version = "1.2.1"
+version = "1.3.0"
 edition = "2021"
 description = "A YAML-configured regex linter and language server: `declint serve` in your editor, `declint check` in CI."
 license = "MIT OR Apache-2.0"
@@ -22,3 +22,9 @@ ureq = "2"
 
 [dev-dependencies]
 serde_json = "1"
+
+# declint is a binary-only crate; docs.rs defaults to `cargo rustdoc
+# --lib`, which fails with "no library targets found" unless told to
+# document other targets.
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
