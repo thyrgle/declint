@@ -300,7 +300,8 @@ config.
 
 1. `--language <id>` — always wins (e.g. `--language markdown`)
 2. The file's extension, via a built-in table of common Neovim filetype
-   names (`md` → `markdown`, `py` → `python`, `sh` → `sh`, ...)
+   names (`md` → `markdown`, `py` → `python`, `sh` → `sh`, ...), plus
+   well-known extension-less filenames (`Dockerfile` → `dockerfile`)
 3. Unknown → only configs **without** a `languages` key apply
 
 ## Imports & presets
@@ -366,6 +367,10 @@ working setup.
   FastAPI-specific rules: blocking calls in async routes, missing
   `response_model`, snake_case route paths, missing OpenAPI tags.
   Install with `declint install gh:thyrgle/decfastapi`.
+- [`gh:thyrgle/dectailwindcss`](https://github.com/thyrgle/dectailwindcss) —
+  Tailwind class-usage hygiene for the templates ESLint can't reach:
+  duplicate and contradicting classes, attribute hygiene, v4
+  readiness. Install with `declint install gh:thyrgle/dectailwindcss`.
 
 ## Sharing rulesets
 
