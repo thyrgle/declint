@@ -357,6 +357,16 @@ Two examples from [`examples/house-rules/`](examples/house-rules/):
 Both are a dozen lines of YAML. See `examples/house-rules/` for the
 working setup.
 
+Both are a dozen lines of YAML. See `examples/house-rules/` for the
+working setup.
+
+### Community rulesets
+
+- [`gh:thyrgle/decfastapi`](https://github.com/thyrgle/decfastapi) —
+  FastAPI-specific rules: blocking calls in async routes, missing
+  `response_model`, snake_case route paths, missing OpenAPI tags.
+  Install with `declint install gh:thyrgle/decfastapi`.
+
 ## Sharing rulesets
 
 Rule sets are plain YAML configs in git repos — anyone's repo can be a
