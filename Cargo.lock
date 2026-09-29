@@ -217,7 +217,7 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
 name = "declint"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "clap",
  "clap_complete",

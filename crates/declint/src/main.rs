@@ -114,7 +114,7 @@ enum Command {
         /// store) instead of installing.
         #[arg(long)]
         list: bool,
-        /// The source: gh:<owner>/<repo>[@<ref>][/subpath]; omitted
+        /// The source: `gh:<owner>/<repo>[@<ref>][/subpath]`; omitted
         /// with --list.
         source: Option<String>,
     },
@@ -124,7 +124,7 @@ enum Command {
         /// .declint/vendor/.
         #[arg(short = 'g', long)]
         global: bool,
-        /// The package: <owner>/<repo> (or <owner>/<repo>@<ref> for
+        /// The package: `<owner>/<repo>` (or `<owner>/<repo>@<ref>` for
         /// project installs).
         package: String,
     },
