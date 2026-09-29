@@ -1,0 +1,84 @@
+{
+  "name": "declint",
+  "displayName": "declint",
+  "description": "YAML-configured linter: diagnostics and quickfixes from your .declint.yaml rules, powered by declint serve",
+  "version": "1.2.0",
+  "publisher": "thyrgle",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thyrgle/declint"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Linters"
+  ],
+  "keywords": [
+    "lint",
+    "linter",
+    "tailwind",
+    "fastapi",
+    "yaml"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "declint",
+      "properties": {
+        "declint.path": {
+          "type": "string",
+          "default": "declint",
+          "description": "Path to the declint executable (cargo install declint)."
+        },
+        "declint.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "serve"
+          ],
+          "description": "Arguments passed to the declint language server."
+        },
+        "declint.filetypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "python",
+            "javascript",
+            "html",
+            "vue",
+            "svelte",
+            "erb",
+            "handlebars",
+            "ini",
+            "markdown",
+            "json",
+            "toml",
+            "yaml",
+            "sh",
+            "dockerfile"
+          ],
+          "description": "Languages the linter attaches to. Match the `languages` keys of your declint configs."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "node build.js"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "vscode-jsonrpc": "^9.0.0"
+  }
+}

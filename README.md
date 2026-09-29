@@ -65,8 +65,14 @@ any other filetype gets a clean (empty) diagnostic publish.
 
 ### VS Code
 
-Point a generic LSP client extension at `declint serve` with the filetypes
-you want.
+Install the [declint extension](https://marketplace.visualstudio.com/items?itemName=thyrgle.declint)
+(or grab the `.vsix` from a release and run `Extensions: Install from
+VSIX...`). It spawns `declint serve` for you; `declint.path`,
+`declint.args`, and `declint.filetypes` live under the `declint`
+settings section — match `declint.filetypes` to your configs'
+`languages` keys.
+
+Any generic LSP client extension pointed at `declint serve` also works.
 
 ## Config discovery
 

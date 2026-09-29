@@ -51,6 +51,22 @@ order. This document is the runbook.
 
 6. Update the composite `action.yml` default `declint-version` input to
    the new release.
+7. Publish the VS Code extension:
+
+   ```sh
+   cd editors/vscode
+   npx --yes @vscode/vsce package --allow-missing-repository
+   npx --yes @vscode/vsce publish            # needs an Azure DevOps PAT
+   npx --yes ovsx publish --pat <token>      # Open VSX (VSCodium etc.)
+   ```
+
+   Both tokens are free: a PAT from an Azure DevOps organization
+   (`dev.azure.com` -> User settings -> Personal access tokens, scope
+   Marketplace -> Manage) and an Open VSX token from
+   `open-vsx.org` -> Settings -> Access Tokens. The marketplace
+   display name is registered with the first publish ("declint" is
+   taken there — the current listing name works around that; only the
+   display name changes, never the `uses:`/extension id).
 
 ## Notes
 
