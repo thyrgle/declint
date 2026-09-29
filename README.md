@@ -44,8 +44,20 @@ declint serve           # discovers .declint.yaml / .declint/ itself
 
 ### Neovim setup
 
-Any LSP client that launches a custom stdio server works. **Neovim**
-(with nvim-lspconfig):
+The recommended way is the
+[declint.nvim](https://github.com/thyrgle/declint.nvim) companion
+plugin — it configures the client and attaches per project:
+
+```lua
+-- lazy.nvim
+{ 'thyrgle/declint.nvim', config = function()
+    require('declint').setup()
+  end,
+}
+```
+
+Any LSP client that launches a custom stdio server works too. **With
+nvim-lspconfig**:
 
 ```lua
 require('lspconfig.configs').declint = {
