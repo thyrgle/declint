@@ -565,3 +565,37 @@ fn install_list_and_remove() {
     assert!(!dir.join(".declint/vendor/thyrgle/rules").exists());
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn color_flag_controls_ansi_output() {
+    let dir = std::env::temp_dir().join(format!("ezlint-color-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    write(
+        &dir.join(".declint.yaml"),
+        "version: 1\nrules:\n  - id: no-sudo\n    pattern: '\\bsudo\\b'\n    message: 'sudo found'\n    severity: error\n",
+    );
+    write(&dir.join("a.ini"), "run sudo here\n");
+
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_declint"))
+            .arg("check")
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+
+    // Auto (piped = non-tty): no ANSI codes.
+    let stdout = run(&["a.ini"]);
+    assert!(!stdout.contains("\x1b["), "{stdout:?}");
+
+    // Always: ANSI codes present.
+    let stdout = run(&["--color", "always", "a.ini"]);
+    assert!(stdout.contains("\x1b[1;31m"), "{stdout:?}");
+
+    // Never: explicitly clean.
+    let stdout = run(&["--color", "never", "a.ini"]);
+    assert!(!stdout.contains("\x1b["), "{stdout:?}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

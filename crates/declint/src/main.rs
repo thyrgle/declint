@@ -12,6 +12,7 @@
 //! `declint.yaml`, walking up through parent directories.
 
 use std::collections::HashMap;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -60,6 +61,10 @@ enum Command {
         /// it are still reported, but no longer fail the run.
         #[arg(long, value_enum, default_value_t = FailOn::Hint)]
         fail_on: FailOn,
+        /// When to colorize text output: auto colors only when the
+        /// output stream is a terminal (and NO_COLOR is unset).
+        #[arg(long, value_enum, default_value_t = ColorChoice::Auto)]
+        color: ColorChoice,
         /// Apply available fixes in place instead of just reporting.
         /// Exit 1 only for violations that remain after fixing.
         #[arg(long)]
@@ -172,6 +177,41 @@ impl FailOn {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ColorChoice {
+    /// Colorize when the output stream is a terminal.
+    Auto,
+    /// Always colorize.
+    Always,
+    /// Never colorize.
+    Never,
+}
+
+impl ColorChoice {
+    fn enabled(self, stream_is_tty: bool) -> bool {
+        match self {
+            Self::Always => true,
+            Self::Never => false,
+            Self::Auto => {
+                stream_is_tty && std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty())
+            }
+        }
+    }
+}
+
+const RESET: &str = "\x1b[0m";
+const BOLD: &str = "\x1b[1m";
+const DIM: &str = "\x1b[2m";
+
+fn severity_paint(severity: declint_core::Severity) -> &'static str {
+    match severity {
+        declint_core::Severity::Error => "\x1b[1;31m",
+        declint_core::Severity::Warning => "\x1b[1;33m",
+        declint_core::Severity::Info => "\x1b[1;36m",
+        declint_core::Severity::Hint => "\x1b[2;36m",
+    }
+}
+
 /// Applies non-overlapping violation fixes to `source`, returning the
 /// fixed content and how many fixes were applied. Fixes are applied in
 /// position order; any fix that overlaps an applied one is skipped.
@@ -272,6 +312,7 @@ fn check(
     language: Option<&String>,
     format: OutputFormat,
     fail_on: FailOn,
+    color: ColorChoice,
     fix: bool,
     files: &[PathBuf],
 ) -> ExitCode {
@@ -295,6 +336,7 @@ fn check(
     let mut unreadable = 0usize;
     let threshold = fail_on.threshold();
     let mut json_items = Vec::new();
+    let colored = color.enabled(std::io::stdout().is_terminal());
 
     for (path, from_walk) in collect_files(files) {
         let source = match std::fs::read_to_string(&path) {
@@ -349,7 +391,7 @@ fn check(
         }
 
         match format {
-            OutputFormat::Text => print_text(&path, &source, &violations),
+            OutputFormat::Text => print_text(&path, &source, &violations, colored),
             OutputFormat::Github => print_github(&path, &source, &violations),
             OutputFormat::Json => print_json(&mut json_items, &path, &source, &violations),
         }
@@ -383,16 +425,32 @@ fn check(
     ExitCode::SUCCESS
 }
 
-fn print_text(path: &std::path::Path, source: &str, violations: &[Violation]) {
+fn print_text(
+    path: &std::path::Path,
+    source: &str,
+    violations: &[Violation],
+    colored: bool,
+) {
     for violation in violations {
         let (line, col) = declint_core::line_col(source, violation.span.start);
-        println!(
-            "{}:{line}:{col}: {}[{}]: {}",
-            path.display(),
-            violation.severity,
-            violation.rule_id,
-            violation.message
-        );
+        if colored {
+            let paint = severity_paint(violation.severity);
+            println!(
+                "{BOLD}{path_display}:{line}:{col}: {paint}{severity}{RESET}[{DIM}{rule}{RESET}]: {message}",
+                path_display = path.display(),
+                severity = violation.severity,
+                rule = violation.rule_id,
+                message = violation.message
+            );
+        } else {
+            println!(
+                "{}:{line}:{col}: {}[{}]: {}",
+                path.display(),
+                violation.severity,
+                violation.rule_id,
+                violation.message
+            );
+        }
     }
 }
 
@@ -780,6 +838,7 @@ fn main() -> ExitCode {
             language,
             format,
             fail_on,
+            color,
             fix,
             files,
         } => check(
@@ -787,6 +846,7 @@ fn main() -> ExitCode {
             language.as_ref(),
             format,
             fail_on,
+            color,
             fix,
             &files,
         ),

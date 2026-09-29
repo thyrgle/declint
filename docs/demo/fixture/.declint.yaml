@@ -1,0 +1,9 @@
+version: 1
+languages: [python]
+import:
+  - preset:python
+rules:
+  - id: todo-comment
+    pattern: '\bTODO\b'
+    message: 'TODO left in code'
+    severity: warning
