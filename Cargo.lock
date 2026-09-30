@@ -240,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "declint-lsp"
-version = "1.3.0"
+version = "1.3.1"
 dependencies = [
  "declint-core",
  "declint-lua",
@@ -479,9 +479,9 @@ checksum = "40ded4dd0e61b4870008c6a024eafc1f9a04fae01b8142923dc0a211671e5aa0"
 
 [[package]]
 name = "increparse-lsp"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4140075e26a1a4934bbade97882d3c179804862b19e6f8414dc70b5a4b5f86cf"
+checksum = "dd02d14c3e28d257c128bac794a8d14aa5647454349b2fe8f3452469007a6526"
 dependencies = [
  "increparse",
  "lsp-server",

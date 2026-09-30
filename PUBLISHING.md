@@ -20,6 +20,13 @@ order. This document is the runbook.
    See `../increparse/PUBLISHING.md`.
 1. Bump versions everywhere (`crates/*/Cargo.toml` — the four crates
    share a version) and update intra-workspace version requirements.
+
+   Exception: a release whose only change is one crate (e.g. a
+   dependency bump after an `increparse` release) may bump and publish
+   just that crate. The shared-version rule applies to releases that
+   change more than one crate; unchanged crates do not need republishing
+   because caret requirements (`version = "1.3.0"`) resolve to any
+   compatible newer release automatically.
 2. `cargo test --workspace && cargo clippy --workspace --all-targets`
    must be clean.
 3. Dry-run each crate and eyeball the payload:
