@@ -474,14 +474,10 @@ dependencies = [
 [[package]]
 name = "increparse"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40ded4dd0e61b4870008c6a024eafc1f9a04fae01b8142923dc0a211671e5aa0"
 
 [[package]]
 name = "increparse-lsp"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3583f522bb756fac394db9edac3fedd2efdc8877e1fae05ecc34fc3f9c529d0"
+version = "0.4.0"
 dependencies = [
  "increparse",
  "lsp-server",
@@ -575,9 +571,9 @@ dependencies = [
 
 [[package]]
 name = "luajit-src"
-version = "210.7.3+1ee778a"
+version = "210.7.4+c6ffc14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "869665372263eb337b14f480cfb864b89f12eade4eb42cb415f71517b4a67572"
+checksum = "1db548b001f0b7da416daf0ffae963912bae6cad1799fa9f4eaba09da6dba837"
 dependencies = [
  "cc",
  "which",
@@ -1177,9 +1173,9 @@ dependencies = [
 
 [[package]]
 name = "yoke-derive"
-version = "0.8.3"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33811428bee40dbceb6d545e95754741d17a6aef9a4849f0fd62e2ba4f412a78"
+checksum = "ec8ebde2db3681e8c9980cc27822030e68752690ddfa9473e739aeb4dbde6d71"
 dependencies = [
  "proc-macro2",
  "quote",
