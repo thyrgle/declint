@@ -48,12 +48,13 @@ order. This document is the runbook.
    cargo publish -p declint
    ```
 
-5. Tag and push (the README's `uses: thyrgle/declint@v1.0.0` example
-   resolves against this tag; a moving `v0` major tag is a nice extra):
+5. Tag and push. Cut a release tag, then re-point the moving `v1` major
+   tag at the release (the README's `uses: thyrgle/declint@v1` example
+   resolves against `v1`):
 
    ```sh
-   git tag v1.0.0 && git push origin v1.0.0
-   git tag -f v0 && git push origin v0 --force
+   git tag v1.3.1 && git push origin v1.3.1
+   git tag -f v1 && git push origin v1 --force
    ```
 
 6. Update the composite `action.yml` default `declint-version` input to
