@@ -18,6 +18,7 @@ rules:
 <p align="center">
   <img src="docs/demo/demo.gif" alt="declint check: find, fix, and test your rules" width="880">
 </p>
+
 **New to declint?** [`doc/tutorial.md`](doc/tutorial.md) builds an INI
 linter step by step — first rules, scoped sections, Lua callbacks, and
 the editor payoff — in about 30 minutes. For a second course,
