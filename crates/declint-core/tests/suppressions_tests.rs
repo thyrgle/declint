@@ -13,9 +13,7 @@ fn yaml(rule_body: &str) -> String {
 
 #[test]
 fn bare_marker_suppresses_on_its_own_line() {
-    let linter = linter_with(&yaml(
-        "    pattern: 'X'\n    message: found\n",
-    ));
+    let linter = linter_with(&yaml("    pattern: 'X'\n    message: found\n"));
     let source = "X\nX # declint:disable\nX\n";
     let v = linter.lint(source);
     assert_eq!(v.len(), 2, "{v:?}");
@@ -25,9 +23,7 @@ fn bare_marker_suppresses_on_its_own_line() {
 
 #[test]
 fn next_line_marker_suppresses_the_following_line() {
-    let linter = linter_with(&yaml(
-        "    pattern: 'X'\n    message: found\n",
-    ));
+    let linter = linter_with(&yaml("    pattern: 'X'\n    message: found\n"));
     let source = "X\n# declint:disable-next-line\nX\nX\n";
     let v = linter.lint(source);
     assert_eq!(v.len(), 2, "{v:?}");

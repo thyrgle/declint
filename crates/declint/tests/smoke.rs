@@ -39,7 +39,8 @@ scopes:
 /// A tab on line 0 (global rule), a loud TODO on line 2 (callback rule:
 /// bangs -> violation, quiet -> allowed), and a shell fence around a
 /// `sudo` on line 4 (scoped rule).
-const SOURCE: &str = "def x = 1;\t# note\n# quiet TODO\n# loud TODO!!!\n```sh\nsudo ls -la /\n```\n";
+const SOURCE: &str =
+    "def x = 1;\t# note\n# quiet TODO\n# loud TODO!!!\n```sh\nsudo ls -la /\n```\n";
 
 fn spawn_server(config_path: &str) -> (Child, ChildStdin, Receiver<String>) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_declint"))
@@ -234,10 +235,7 @@ fn declint_server_smoke() {
     let diags = wait_for_diagnostics(&rx, Some(1));
     let diags = diags.as_array().unwrap();
     assert_eq!(diags.len(), 2, "the scoped sudo and the loud TODO survive");
-    let codes: Vec<&str> = diags
-        .iter()
-        .map(|d| d["code"].as_str().unwrap())
-        .collect();
+    let codes: Vec<&str> = diags.iter().map(|d| d["code"].as_str().unwrap()).collect();
     assert_eq!(codes, ["loud-todo", "no-sudo"]);
 
     // A document whose languageId does not match the config's

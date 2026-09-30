@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use declint_core::{Callbacks, CallbackRef, Config, Decision, Linter, MatchCallback, MatchContext, Severity};
+use declint_core::{
+    CallbackRef, Callbacks, Config, Decision, Linter, MatchCallback, MatchContext, Severity,
+};
 
 struct Fixed(Decision);
 
@@ -43,11 +45,15 @@ const PROBE: &str = "    pattern: 'TODO(?<word>\\w*)'\n";
 fn callback_reference_classification() {
     assert_eq!(
         CallbackRef::parse("checks/foo.lua"),
-        CallbackRef::File { path: "checks/foo.lua".into() }
+        CallbackRef::File {
+            path: "checks/foo.lua".into()
+        }
     );
     assert_eq!(
         CallbackRef::parse("foo.lua"),
-        CallbackRef::File { path: "foo.lua".into() }
+        CallbackRef::File {
+            path: "foo.lua".into()
+        }
     );
     assert_eq!(
         CallbackRef::parse("my_name"),
@@ -68,7 +74,8 @@ fn unregistered_callback_is_a_build_error() {
     let config = Config::from_str(&yaml(&format!("{PROBE}    callback: nope\n"))).unwrap();
     let e = Linter::new(config, &Callbacks::new()).unwrap_err();
     assert!(
-        e.to_string().contains("rule 'probe' references callback 'nope'"),
+        e.to_string()
+            .contains("rule 'probe' references callback 'nope'"),
         "{e}"
     );
 }
@@ -111,16 +118,16 @@ fn violate_decision_overrides_message_and_severity() {
 
     let text = "x\nTODOhere x";
     let v = linter.lint_all_in(
-        declint_core::DocInfo { path: "a.txt", language: "text" },
+        declint_core::DocInfo {
+            path: "a.txt",
+            language: "text",
+        },
         text,
     );
     assert_eq!(v.len(), 1);
     // "<match>|<path>|<language>|<rule>|<line>:<col>|<named>|<numbered>"
     // The only group is named `word`, so the numbered key is absent.
-    assert_eq!(
-        v[0].message,
-        "TODOhere|a.txt|text|probe|2:1|here|"
-    );
+    assert_eq!(v[0].message, "TODOhere|a.txt|text|probe|2:1|here|");
     assert_eq!(v[0].severity, Severity::Hint);
     assert_eq!(v[0].span.to_range(), 2..10);
 }
@@ -153,13 +160,16 @@ fn callback_error_becomes_an_error_diagnostic() {
     let v = linter.lint("TODO");
     assert_eq!(v.len(), 1);
     assert_eq!(v[0].severity, Severity::Error);
-    assert!(v[0].message.contains("callback error: exploded"), "{}", v[0].message);
+    assert!(
+        v[0].message.contains("callback error: exploded"),
+        "{}",
+        v[0].message
+    );
 }
 
 #[test]
 fn message_is_optional_with_a_callback() {
-    let config =
-        Config::from_str(&yaml(&format!("{PROBE}    callback: permit\n"))).unwrap();
+    let config = Config::from_str(&yaml(&format!("{PROBE}    callback: permit\n"))).unwrap();
     let mut callbacks = Callbacks::new();
     callbacks.register("permit", Arc::new(Fixed(Decision::Allow)));
     assert!(Linter::new(config, &callbacks).is_ok());
@@ -173,7 +183,11 @@ fn violates_without_message_template_are_flagged() {
     let linter = Linter::new(config, &callbacks).unwrap();
     let v = linter.lint("TODO");
     assert_eq!(v[0].severity, Severity::Error);
-    assert!(v[0].message.contains("without a default message"), "{}", v[0].message);
+    assert!(
+        v[0].message.contains("without a default message"),
+        "{}",
+        v[0].message
+    );
 }
 
 #[test]
@@ -193,7 +207,10 @@ scopes:
     let config = Config::from_str(yaml).unwrap();
     let linter = Linter::new(config, &callbacks).unwrap();
     let v = linter.lint_all_in(
-        declint_core::DocInfo { path: "p.sh", language: "sh" },
+        declint_core::DocInfo {
+            path: "p.sh",
+            language: "sh",
+        },
         "X\nTODO now\n",
     );
     assert_eq!(v.len(), 1);
@@ -218,7 +235,9 @@ impl MatchParser for DuplicateKeys {
         let mut out = Vec::new();
         for (line_no, line) in text.lines().enumerate() {
             let trimmed = line.trim_start();
-            let Some(eq) = trimmed.find('=') else { continue };
+            let Some(eq) = trimmed.find('=') else {
+                continue;
+            };
             let key = trimmed[..eq].trim();
             if let Some((_, first)) = seen.iter_mut().find(|(k, _)| *k == key) {
                 let start = line_no + 1; // fake a plausible offset
@@ -263,10 +282,9 @@ fn parser_error_becomes_an_error_diagnostic() {
     }
     let mut callbacks = Callbacks::new();
     callbacks.register_parser("boom", Arc::new(Boom));
-    let config = Config::from_str(
-        "version: 1\nrules:\n  - id: probe\n    parser: boom\n    message: m\n",
-    )
-    .unwrap();
+    let config =
+        Config::from_str("version: 1\nrules:\n  - id: probe\n    parser: boom\n    message: m\n")
+            .unwrap();
     let linter = Linter::new(config, &callbacks).unwrap();
     let v = linter.lint("anything");
     assert_eq!(v.len(), 1);
@@ -280,10 +298,9 @@ fn parser_error_becomes_an_error_diagnostic() {
 
 #[test]
 fn unregistered_parser_is_a_build_error() {
-    let config = Config::from_str(
-        "version: 1\nrules:\n  - id: probe\n    parser: nope\n    message: m\n",
-    )
-    .unwrap();
+    let config =
+        Config::from_str("version: 1\nrules:\n  - id: probe\n    parser: nope\n    message: m\n")
+            .unwrap();
     let e = Linter::new(config, &Callbacks::new()).unwrap_err();
     assert!(
         e.to_string()
@@ -298,7 +315,9 @@ fn parser_rule_in_scope_gets_region_text() {
 
     impl MatchParser for RegionSpy {
         fn find(&self, text: &str, offset: usize) -> Result<Vec<RawMatch>, String> {
-            Ok(vec![RawMatch::new(0, 1).with_capture("seen", text).with_capture("off", offset.to_string())])
+            Ok(vec![RawMatch::new(0, 1)
+                .with_capture("seen", text)
+                .with_capture("off", offset.to_string())])
         }
     }
     let mut callbacks = Callbacks::new();

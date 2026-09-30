@@ -14,8 +14,10 @@ fn language_from_filename(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_str()?.to_ascii_lowercase();
     // Suffixed variants (`Dockerfile.web`, `Containerfile.prod`) count
     // as the same language.
-    let language = if name == "dockerfile" || name.starts_with("dockerfile.")
-        || name == "containerfile" || name.starts_with("containerfile.")
+    let language = if name == "dockerfile"
+        || name.starts_with("dockerfile.")
+        || name == "containerfile"
+        || name.starts_with("containerfile.")
     {
         "dockerfile"
     } else if name == "makefile" || name == "gnumakefile" {
@@ -134,7 +136,10 @@ mod filename_tests {
             language_from_path(Path::new("Makefile")).as_deref(),
             Some("make")
         );
-        assert_eq!(language_from_path(Path::new("src/main.rs")).as_deref(), Some("rust"));
+        assert_eq!(
+            language_from_path(Path::new("src/main.rs")).as_deref(),
+            Some("rust")
+        );
     }
 
     #[test]

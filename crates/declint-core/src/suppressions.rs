@@ -42,13 +42,7 @@ impl Suppressions {
 
     /// Whether a violation of `rule_id` spanning `start..end` is
     /// suppressed.
-    pub fn is_suppressed(
-        &self,
-        rule_id: &str,
-        source: &str,
-        start: usize,
-        end: usize,
-    ) -> bool {
+    pub fn is_suppressed(&self, rule_id: &str, source: &str, start: usize, end: usize) -> bool {
         let (start_line, _) = crate::line_col(source, start);
         let last = end.saturating_sub(1).max(start);
         let (end_line, _) = crate::line_col(source, last);

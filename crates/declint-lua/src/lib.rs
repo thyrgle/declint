@@ -85,17 +85,27 @@ impl MatchCallback for LuaCallback {
         let lua = &self.lua;
 
         let table = lua.create_table().map_err(|e| e.to_string())?;
-        table.set("match", ctx.match_text.as_str()).map_err(|e| e.to_string())?;
+        table
+            .set("match", ctx.match_text.as_str())
+            .map_err(|e| e.to_string())?;
         table.set("start", ctx.start).map_err(|e| e.to_string())?;
         table.set("finish", ctx.finish).map_err(|e| e.to_string())?;
         table.set("line", ctx.line).map_err(|e| e.to_string())?;
         table.set("col", ctx.col).map_err(|e| e.to_string())?;
-        table.set("path", ctx.path.as_str()).map_err(|e| e.to_string())?;
-        table.set("language", ctx.language.as_str()).map_err(|e| e.to_string())?;
-        table.set("rule", ctx.rule_id.as_str()).map_err(|e| e.to_string())?;
+        table
+            .set("path", ctx.path.as_str())
+            .map_err(|e| e.to_string())?;
+        table
+            .set("language", ctx.language.as_str())
+            .map_err(|e| e.to_string())?;
+        table
+            .set("rule", ctx.rule_id.as_str())
+            .map_err(|e| e.to_string())?;
         let captures = lua.create_table().map_err(|e| e.to_string())?;
         for (name, value) in &ctx.captures {
-            captures.set(name.as_str(), value.as_str()).map_err(|e| e.to_string())?;
+            captures
+                .set(name.as_str(), value.as_str())
+                .map_err(|e| e.to_string())?;
         }
         table.set("captures", captures).map_err(|e| e.to_string())?;
 
@@ -120,7 +130,9 @@ impl MatchCallback for LuaCallback {
                     Ok(Value::String(s)) => {
                         let name = s.to_str().map_err(|e| e.to_string())?;
                         Some(Severity::parse(&name).ok_or_else(|| {
-                            format!("unknown severity `{name}` (expected error, warning, info, hint)")
+                            format!(
+                                "unknown severity `{name}` (expected error, warning, info, hint)"
+                            )
                         })?)
                     }
                     Ok(other) => {
@@ -279,7 +291,8 @@ pub fn attach(set: &ConfigSet, callbacks: &mut Callbacks) -> Result<(), ConfigEr
             Ok(())
         };
 
-        let global_label = |rule: &declint_core::Rule| format!("{}: rule '{}'", shown(&named.path), rule.id);
+        let global_label =
+            |rule: &declint_core::Rule| format!("{}: rule '{}'", shown(&named.path), rule.id);
         visit(&named.config.rules, &global_label)?;
         for scope in &named.config.scopes {
             let scope_label = |rule: &declint_core::Rule| {
@@ -391,7 +404,10 @@ mod tests {
             "    callback: |\n      return function(c)\n        return { severity = \"hint\", message = \"seen \" .. c.match .. \" at \" .. c.line .. \":\" .. c.col }\n      end\n",
         ));
         let v = linter.lint_in(
-            declint_core::DocInfo { path: "f.txt", language: "text" },
+            declint_core::DocInfo {
+                path: "f.txt",
+                language: "text",
+            },
             "ab\nTODOhere",
         );
         assert_eq!(v.len(), 1);
@@ -442,7 +458,10 @@ rules:
             "    callback: |\n      return function(c)\n        return { message = c.rule .. \"/\" .. c.language .. \"/\" .. c.path .. \"/\" .. c.match .. \"/\" .. c.start .. \"-\" .. c.finish }\n      end\n",
         ));
         let v = linter.lint_in(
-            declint_core::DocInfo { path: "p.sh", language: "sh" },
+            declint_core::DocInfo {
+                path: "p.sh",
+                language: "sh",
+            },
             "go TODO go",
         );
         assert_eq!(v[0].message, "probe/sh/p.sh/TODO/3-7");
@@ -486,7 +505,11 @@ rules:
             "    callback: |\n      return function(c) return { severity = \"hint\" } end\n",
         ));
         let v = linter.lint("TODO");
-        assert!(v[0].message.contains("without a `message`"), "{}", v[0].message);
+        assert!(
+            v[0].message.contains("without a `message`"),
+            "{}",
+            v[0].message
+        );
     }
 
     #[test]
@@ -533,14 +556,17 @@ rules:
 
     #[test]
     fn plain_configs_need_no_lua() {
-        let config = Config::from_str(
-            "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n",
-        )
-        .unwrap();
+        let config =
+            Config::from_str("version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n")
+                .unwrap();
         let dir = std::env::temp_dir().join(format!("declint-lua-{}-plain", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(".declint.yaml"), "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n").unwrap();
+        std::fs::write(
+            dir.join(".declint.yaml"),
+            "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n",
+        )
+        .unwrap();
         let set = ConfigSet::discover(&dir).unwrap();
         let mut callbacks = Callbacks::new();
         attach(&set, &mut callbacks).unwrap();
@@ -603,7 +629,10 @@ rules:
     fn duplicate_keys_are_detectable_at_last() {
         let linter = linter_with(&duplicate_keys_yaml());
         let v = linter.lint_in(
-            DocInfo { path: "app.ini", language: "ini" },
+            DocInfo {
+                path: "app.ini",
+                language: "ini",
+            },
             "[server]\nport = 1\nport = 2\nport = 3\n",
         );
         // port appears 3 times: the 2nd and 3rd definitions are flagged,
@@ -643,7 +672,11 @@ rules:
             "version: 1\nrules:\n  - id: r\n    parser: |\n      return function(t, o) return { 42 } end\n    message: m\n",
         );
         let v = linter.lint("x");
-        assert!(v[0].message.contains("matches must be tables"), "{}", v[0].message);
+        assert!(
+            v[0].message.contains("matches must be tables"),
+            "{}",
+            v[0].message
+        );
 
         let linter = linter_with(
             "version: 1\nrules:\n  - id: r\n    parser: |\n      return function(t, o) return { { start = 5, finish = 2 } } end\n    message: m\n",
@@ -721,7 +754,10 @@ mod import_tests {
         attach(&set, &mut callbacks).unwrap();
         let linter = Linter::new(set.configs()[0].config.clone(), &callbacks).unwrap();
         let v = linter.lint_in(
-            DocInfo { path: "a.md", language: "markdown" },
+            DocInfo {
+                path: "a.md",
+                language: "markdown",
+            },
             "TODO!!",
         );
         assert_eq!(v.len(), 1);
@@ -732,7 +768,8 @@ mod import_tests {
     fn imported_python_preset_scope_handles_async_defs() {
         static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!("declint-lua-{}-{n}-async", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("declint-lua-{}-{n}-async", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
@@ -747,7 +784,10 @@ mod import_tests {
 
         let source = "async def go():\n    print(1)\n\nprint(2)\n";
         let v = linter.lint_all_in(
-            DocInfo { path: "app.py", language: "python" },
+            DocInfo {
+                path: "app.py",
+                language: "python",
+            },
             source,
         );
         // Inside `async def go`: the missing-docstring absence rule

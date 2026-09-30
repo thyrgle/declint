@@ -158,9 +158,7 @@ impl Template {
                         out.push_str(match_text);
                         continue;
                     }
-                    if let Some((_, value)) =
-                        captures.iter().find(|(key, _)| key == name)
-                    {
+                    if let Some((_, value)) = captures.iter().find(|(key, _)| key == name) {
                         out.push_str(value);
                     }
                 }
@@ -187,13 +185,15 @@ mod tests {
         let template = Template::parse(src).unwrap();
         let regex = regex::Regex::new(pattern).unwrap();
         template.validate(&regex).unwrap();
-        template
-            .render(&regex.captures(haystack).expect("must match"))
+        template.render(&regex.captures(haystack).expect("must match"))
     }
 
     #[test]
     fn literal_passes_through() {
-        assert_eq!(render("no placeholders here", "x", "x"), "no placeholders here");
+        assert_eq!(
+            render("no placeholders here", "x", "x"),
+            "no placeholders here"
+        );
     }
 
     #[test]
@@ -203,10 +203,7 @@ mod tests {
 
     #[test]
     fn named_group_placeholder() {
-        assert_eq!(
-            render("got {word}!", "(?<word>\\w+)", "hi"),
-            "got hi!"
-        );
+        assert_eq!(render("got {word}!", "(?<word>\\w+)", "hi"), "got hi!");
     }
 
     #[test]

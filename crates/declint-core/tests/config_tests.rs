@@ -28,8 +28,9 @@ fn good_config_parses() {
 
 #[test]
 fn severity_defaults_to_warning() {
-    let config = Config::from_str("version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n")
-        .unwrap();
+    let config =
+        Config::from_str("version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n")
+            .unwrap();
     assert_eq!(config.rules[0].severity, Severity::Warning);
 }
 
@@ -68,9 +69,7 @@ fn missing_rule_keys_are_reported() {
 
 #[test]
 fn pattern_and_parser_are_mutually_exclusive() {
-    let e = err(
-        "version: 1\nrules:\n  - id: r\n    pattern: x\n    parser: p\n    message: m\n",
-    );
+    let e = err("version: 1\nrules:\n  - id: r\n    pattern: x\n    parser: p\n    message: m\n");
     assert!(e.contains("mutually exclusive"), "{e}");
 }
 
@@ -112,16 +111,18 @@ fn unknown_keys_are_rejected() {
 
 #[test]
 fn bad_severity_is_rejected() {
-    let e = err(
-        "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n    severity: fatal\n",
-    );
+    let e =
+        err("version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n    severity: fatal\n");
     assert!(e.contains("`severity` must be one of"), "{e}");
 }
 
 #[test]
 fn errors_carry_line_numbers() {
-    let e = Config::from_str(GOOD.replace("severity: warning", "severity: fatal").as_str())
-        .unwrap_err();
+    let e = Config::from_str(
+        GOOD.replace("severity: warning", "severity: fatal")
+            .as_str(),
+    )
+    .unwrap_err();
     let line = e.line().expect("severity line known");
     assert!((2..=6).contains(&line), "got line {line}");
 }
@@ -133,7 +134,10 @@ fn load_attaches_path() {
     let path = dir.join("bad.yaml");
     std::fs::write(&path, "version: 2\nrules: []").unwrap();
     let e = Config::load(&path).unwrap_err();
-    assert!(e.to_string().starts_with(&path.display().to_string()), "{e}");
+    assert!(
+        e.to_string().starts_with(&path.display().to_string()),
+        "{e}"
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -212,7 +216,10 @@ fn scope_and_rule_ids_share_one_namespace() {
 #[test]
 fn scoped_rule_errors_name_the_scope() {
     let e = err("version: 1\nscopes:\n  - id: sh\n    start: x\n    rules:\n      - id: r\n        pattern: '('\n        message: m\n");
-    assert!(e.contains("scope 'sh' rule 0 ('r'): invalid pattern"), "{e}");
+    assert!(
+        e.contains("scope 'sh' rule 0 ('r'): invalid pattern"),
+        "{e}"
+    );
 }
 
 #[test]
@@ -237,10 +244,9 @@ fn languages_key_parses_and_dedupes() {
 
 #[test]
 fn no_languages_key_matches_everything() {
-    let config = Config::from_str(
-        "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n",
-    )
-    .unwrap();
+    let config =
+        Config::from_str("version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n")
+            .unwrap();
     assert!(config.languages.is_empty());
     assert!(config.matches_language(""));
     assert!(config.matches_language("anything"));
@@ -248,7 +254,8 @@ fn no_languages_key_matches_everything() {
 
 #[test]
 fn bad_languages_are_rejected() {
-    let e = err("version: 1\nlanguages: markdown\nrules:\n  - id: r\n    pattern: x\n    message: m\n");
+    let e =
+        err("version: 1\nlanguages: markdown\nrules:\n  - id: r\n    pattern: x\n    message: m\n");
     assert!(e.contains("`languages` must be a list"), "{e}");
     let e = err("version: 1\nlanguages: [markdown, '']\nrules:\n  - id: r\n    pattern: x\n    message: m\n");
     assert!(e.contains("non-empty strings"), "{e}");

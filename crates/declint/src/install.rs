@@ -235,16 +235,12 @@ pub fn run(
         Destination::Global => {
             let store = declint_core::store::global_store_dir()
                 .ok_or_else(|| "cannot locate a global store (no HOME directory)".to_string())?;
-            (
-                store.join(&source.owner).join(&source.repo),
-                String::new(),
-            )
+            (store.join(&source.owner).join(&source.repo), String::new())
         }
     };
 
     let reference_for_fetch = reference.clone();
-    let (entry_repo_path, entry_content) =
-        fetch_entry(fetcher, source, &reference_for_fetch)?;
+    let (entry_repo_path, entry_content) = fetch_entry(fetcher, source, &reference_for_fetch)?;
 
     let mut vendored = BTreeSet::new();
     let mut visited = BTreeSet::new();
@@ -349,9 +345,9 @@ fn fetch_tree(
             continue;
         }
         let url = raw_url(source, reference, &child_path);
-        let child_content = fetcher.fetch(&url).map_err(|e| {
-            format!("import '{entry}' of `{repo_path}`: fetch failed: {e}")
-        })?;
+        let child_content = fetcher
+            .fetch(&url)
+            .map_err(|e| format!("import '{entry}' of `{repo_path}`: fetch failed: {e}"))?;
         fetch_tree(
             fetcher,
             source,
@@ -373,15 +369,10 @@ fn fetch_tree(
 pub fn import_relative(config_file: &Path, entry_file: &Path) -> String {
     let config_dir = config_file.parent().unwrap_or(Path::new("."));
     let base = entry_file.strip_prefix(config_dir).unwrap_or(entry_file);
-    format!(
-        ".{}",
-        std::path::Path::new(".")
-            .join(base)
-            .display()
-    )
-    .trim_start_matches("./.")
-    .to_string()
-    .replace('\\', "/")
+    format!(".{}", std::path::Path::new(".").join(base).display())
+        .trim_start_matches("./.")
+        .to_string()
+        .replace('\\', "/")
 }
 
 /// Appends `entry` to an existing top-level `import:` list, if the raw
@@ -407,10 +398,7 @@ pub fn wire_import(config_text: &str, entry: &str) -> Option<String> {
             break;
         }
     }
-    lines.insert(
-        insert_at,
-        format!("{}  - {}", " ".repeat(indent), entry),
-    );
+    lines.insert(insert_at, format!("{}  - {}", " ".repeat(indent), entry));
     let mut out = lines.join("\n");
     if config_text.ends_with('\n') {
         out.push('\n');
@@ -427,10 +415,7 @@ mod tests {
 
     impl Fetcher for FakeFetcher {
         fn fetch(&self, url: &str) -> Result<String, FetchError> {
-            self.0
-                .get(url)
-                .cloned()
-                .ok_or(FetchError::NotFound)
+            self.0.get(url).cloned().ok_or(FetchError::NotFound)
         }
     }
 
@@ -449,10 +434,8 @@ mod tests {
         );
         // A repo whose entry config is the hidden name.
         files.insert(
-            "https://raw.githubusercontent.com/thyrgle/dot/HEAD/.declint.yaml"
-                .to_string(),
-            "version: 1\nrules:\n  - id: dot-rule\n    pattern: 'Z'\n    message: m\n"
-                .to_string(),
+            "https://raw.githubusercontent.com/thyrgle/dot/HEAD/.declint.yaml".to_string(),
+            "version: 1\nrules:\n  - id: dot-rule\n    pattern: 'Z'\n    message: m\n".to_string(),
         );
         FakeFetcher(files)
     }
@@ -476,35 +459,46 @@ mod tests {
 
     #[test]
     fn vendors_entry_and_recursive_imports() {
-        let dir = std::env::temp_dir()
-            .join(format!("declint-inst-{}-a", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("declint-inst-{}-a", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let source = parse_gh_source("gh:thyrgle/rules").unwrap();
-        let outcome = run(&fake_github(), &source, &Destination::Project { root: dir.clone() })
-            .unwrap();
+        let outcome = run(
+            &fake_github(),
+            &source,
+            &Destination::Project { root: dir.clone() },
+        )
+        .unwrap();
 
-        let main = std::fs::read_to_string(dir.join(".declint/vendor/thyrgle/rules/HEAD/declint.yaml"))
-            .unwrap();
+        let main =
+            std::fs::read_to_string(dir.join(".declint/vendor/thyrgle/rules/HEAD/declint.yaml"))
+                .unwrap();
         assert!(main.contains("main-rule"));
-        let shared = std::fs::read_to_string(dir.join(".declint/vendor/thyrgle/rules/HEAD/shared.yaml"))
-            .unwrap();
+        let shared =
+            std::fs::read_to_string(dir.join(".declint/vendor/thyrgle/rules/HEAD/shared.yaml"))
+                .unwrap();
         assert!(shared.contains("shared-rule"));
         assert_eq!(outcome.files.len(), 2);
-        assert_eq!(outcome.import_entry, ".declint/vendor/thyrgle/rules/HEAD/declint.yaml");
+        assert_eq!(
+            outcome.import_entry,
+            ".declint/vendor/thyrgle/rules/HEAD/declint.yaml"
+        );
         assert!(outcome.floating_reference);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn hidden_entry_name_falls_back() {
-        let dir = std::env::temp_dir()
-            .join(format!("declint-inst-{}-b", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("declint-inst-{}-b", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let source = parse_gh_source("gh:thyrgle/dot").unwrap();
-        let outcome = run(&fake_github(), &source, &Destination::Project { root: dir.clone() })
-            .unwrap();
+        let outcome = run(
+            &fake_github(),
+            &source,
+            &Destination::Project { root: dir.clone() },
+        )
+        .unwrap();
         let entry = std::fs::read_to_string(outcome.entry_file).unwrap();
         assert!(entry.contains("dot-rule"));
         std::fs::remove_dir_all(&dir).unwrap();
@@ -512,13 +506,16 @@ mod tests {
 
     #[test]
     fn missing_entry_lists_candidates() {
-        let dir = std::env::temp_dir()
-            .join(format!("declint-inst-{}-c", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("declint-inst-{}-c", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let source = parse_gh_source("gh:nobody/nothing").unwrap();
-        let e = run(&FakeFetcher(HashMap::new()), &source, &Destination::Project { root: dir.clone() })
-            .unwrap_err();
+        let e = run(
+            &FakeFetcher(HashMap::new()),
+            &source,
+            &Destination::Project { root: dir.clone() },
+        )
+        .unwrap_err();
         assert!(e.contains("no entry config found"), "{e}");
         assert!(e.contains("declint.yaml"), "{e}");
         std::fs::remove_dir_all(&dir).unwrap();
@@ -527,8 +524,7 @@ mod tests {
     #[test]
     fn global_destination_uses_the_store() {
         // DECLINT_HOME is read at resolve time; keep the window small.
-        let dir = std::env::temp_dir()
-            .join(format!("declint-inst-{}-g", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("declint-inst-{}-g", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("DECLINT_HOME", &dir);
@@ -538,10 +534,7 @@ mod tests {
         let entry = std::fs::read_to_string(outcome.entry_file.clone()).unwrap();
         assert!(entry.contains("main-rule"));
         // And a config can now resolve it through the store.
-        let config = Config::from_str(
-            "version: 1\nimport:\n  - global:thyrgle/rules\n",
-        )
-        .unwrap();
+        let config = Config::from_str("version: 1\nimport:\n  - global:thyrgle/rules\n").unwrap();
         assert!(config.rules.iter().any(|r| r.id == "main-rule"));
         std::env::remove_var("DECLINT_HOME");
         std::fs::remove_dir_all(&dir).unwrap();
@@ -551,7 +544,10 @@ mod tests {
     fn wire_import_appends_to_existing_list() {
         let original = "version: 1\nimport:\n  - preset:ini\nrules: []\n";
         let wired = wire_import(original, ".declint/vendor/x/declint.yaml").unwrap();
-        assert!(wired.contains("  - preset:ini\n  - .declint/vendor/x/declint.yaml\n"), "{wired}");
+        assert!(
+            wired.contains("  - preset:ini\n  - .declint/vendor/x/declint.yaml\n"),
+            "{wired}"
+        );
         assert!(wired.ends_with("rules: []\n"));
 
         // No import key: no edit.

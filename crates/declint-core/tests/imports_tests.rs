@@ -14,7 +14,8 @@ fn write(path: &Path, content: &str) {
 fn project(tag: &str) -> PathBuf {
     static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!("declint-imports-{}-{n}-{tag}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("declint-imports-{}-{n}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -48,8 +49,12 @@ fn preset_import_brings_its_rules() {
     assert!(ids.contains(&"no-tabs"));
     assert!(ids.contains(&"trailing-whitespace"));
     assert!(ids.contains(&"empty-value"));
-    let scope_ids: Vec<&str> =
-        set.configs()[0].config.scopes.iter().map(|s| s.id.as_str()).collect();
+    let scope_ids: Vec<&str> = set.configs()[0]
+        .config
+        .scopes
+        .iter()
+        .map(|s| s.id.as_str())
+        .collect();
     assert_eq!(scope_ids, ["server"]);
 }
 
@@ -111,7 +116,8 @@ fn non_preset_schemes_need_file_loading() {
     )
     .unwrap_err();
     assert!(
-        e.to_string().contains("requires loading the config from a file"),
+        e.to_string()
+            .contains("requires loading the config from a file"),
         "{e}"
     );
 
@@ -202,13 +208,16 @@ fn relative_imports_require_file_loading() {
         "version: 1\nimport:\n  - ./team.yaml\nrules:\n  - id: r\n    pattern: x\n    message: m\n",
     )
     .unwrap_err();
-    assert!(e.to_string().contains("requires loading the config from a file"), "{e}");
+    assert!(
+        e.to_string()
+            .contains("requires loading the config from a file"),
+        "{e}"
+    );
 }
 
 #[test]
 fn preset_imports_work_without_a_file() {
-    let config =
-        Config::from_str("version: 1\nimport:\n  - preset:markdown\n").unwrap();
+    let config = Config::from_str("version: 1\nimport:\n  - preset:markdown\n").unwrap();
     assert!(config.rules.iter().any(|r| r.id == "bare-url"));
 }
 
@@ -230,7 +239,10 @@ fn ini_preset_patterns_work_on_crlf_files() {
     );
     let source = "[server]\r\n\tport = 8000\r\nname = x   \r\n";
     let v = linter.lint_all_in(
-        declint_core::DocInfo { path: "a.ini", language: "ini" },
+        declint_core::DocInfo {
+            path: "a.ini",
+            language: "ini",
+        },
         source,
     );
     let ids: Vec<&str> = v.iter().map(|x| x.rule_id.as_str()).collect();
@@ -239,5 +251,8 @@ fn ini_preset_patterns_work_on_crlf_files() {
         ids.contains(&"trailing-whitespace"),
         "trailing whitespace before \\r must be found: {v:?}"
     );
-    assert!(ids.contains(&"in-server"), "scope segmentation on CRLF: {v:?}");
+    assert!(
+        ids.contains(&"in-server"),
+        "scope segmentation on CRLF: {v:?}"
+    );
 }

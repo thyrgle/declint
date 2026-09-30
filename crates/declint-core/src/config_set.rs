@@ -4,8 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::config::{Config, ConfigError};
 use crate::config::Scope;
+use crate::config::{Config, ConfigError};
 
 /// The hidden config file: `.declint.yaml`.
 pub const CONFIG_FILE: &str = ".declint.yaml";
@@ -68,12 +68,14 @@ impl ConfigSet {
         if path.is_dir() {
             let mut files: Vec<PathBuf> = std::fs::read_dir(path)
                 .map_err(|e| {
-                    ConfigError::new(format!("cannot read config directory: {e}"))
-                        .with_path(&shown)
+                    ConfigError::new(format!("cannot read config directory: {e}")).with_path(&shown)
                 })?
                 .filter_map(|entry| entry.ok().map(|e| e.path()))
                 .filter(|p| {
-                    matches!(p.extension().and_then(|e| e.to_str()), Some("yaml") | Some("yml"))
+                    matches!(
+                        p.extension().and_then(|e| e.to_str()),
+                        Some("yaml") | Some("yml")
+                    )
                 })
                 .collect();
             files.sort();
@@ -91,7 +93,10 @@ impl ConfigSet {
         }
         let config = Config::load(path)?;
         Ok(Self {
-            configs: vec![NamedConfig { path: path.to_path_buf(), config }],
+            configs: vec![NamedConfig {
+                path: path.to_path_buf(),
+                config,
+            }],
         })
     }
 

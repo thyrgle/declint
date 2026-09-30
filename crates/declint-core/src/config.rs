@@ -282,9 +282,7 @@ impl Config {
         let yaml = std::fs::read_to_string(path).map_err(|e| {
             ConfigError::new(format!("cannot read config file: {e}")).with_path(&shown)
         })?;
-        let canonical = path
-            .canonicalize()
-            .unwrap_or_else(|_| path.to_path_buf());
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let mut stack = Vec::new();
         let base = path.parent().map(Path::to_path_buf);
         Self::resolve(
@@ -359,25 +357,17 @@ impl Config {
                         .at_import(entry_text, origin));
                     };
                     let child_yaml = std::fs::read_to_string(&entry_path).map_err(|e| {
-                        ConfigError::new(format!(
-                            "cannot read global package `{pkg}`: {e}"
-                        ))
-                        .at_import(entry_text, origin)
+                        ConfigError::new(format!("cannot read global package `{pkg}`: {e}"))
+                            .at_import(entry_text, origin)
                     })?;
                     let canonical = entry_path.canonicalize().map_err(|e| {
-                        ConfigError::new(format!(
-                            "cannot resolve global package `{pkg}`: {e}"
-                        ))
-                        .at_import(entry_text, origin)
+                        ConfigError::new(format!("cannot resolve global package `{pkg}`: {e}"))
+                            .at_import(entry_text, origin)
                     })?;
                     let child_origin = format!("global:{pkg}");
                     let child = Self::resolve(
                         &child_yaml,
-                        Some(
-                            entry_path
-                                .parent()
-                                .unwrap_or(Path::new(".")),
-                        ),
+                        Some(entry_path.parent().unwrap_or(Path::new("."))),
                         &child_origin,
                         &canonical.display().to_string(),
                         stack,
@@ -402,10 +392,8 @@ impl Config {
                     };
                     let path = base.join(relative);
                     let child_yaml = std::fs::read_to_string(&path).map_err(|e| {
-                        ConfigError::new(format!(
-                            "cannot read imported config `{relative}`: {e}"
-                        ))
-                        .at_import(entry_text, origin)
+                        ConfigError::new(format!("cannot read imported config `{relative}`: {e}"))
+                            .at_import(entry_text, origin)
                     })?;
                     let canonical = path.canonicalize().map_err(|e| {
                         ConfigError::new(format!(
@@ -583,20 +571,16 @@ impl Config {
             None => Vec::new(),
             Some(v) => {
                 let Value::Sequence(entries) = v else {
-                    return Err(ConfigError::new("`scopes` must be a list of scope mappings"));
+                    return Err(ConfigError::new(
+                        "`scopes` must be a list of scope mappings",
+                    ));
                 };
                 let lines = sequence_item_lines(yaml, "scopes");
                 entries
                     .iter()
                     .enumerate()
                     .map(|(index, entry)| {
-                        parse_scope(
-                            entry,
-                            index,
-                            lines.get(index).copied(),
-                            yaml,
-                            &mut seen_ids,
-                        )
+                        parse_scope(entry, index, lines.get(index).copied(), yaml, &mut seen_ids)
                     })
                     .collect::<Result<Vec<_>, _>>()?
             }
@@ -683,7 +667,9 @@ fn parse_scope(
     };
 
     let Value::Mapping(map) = entry else {
-        return Err(at_scope("must be a mapping with `id`, `start`, and `rules` keys"));
+        return Err(at_scope(
+            "must be a mapping with `id`, `start`, and `rules` keys",
+        ));
     };
 
     for key in map.keys() {
@@ -710,7 +696,9 @@ fn parse_scope(
         )));
     }
 
-    let start_value = map.get(Value::from("start")).ok_or_else(|| missing("start"))?;
+    let start_value = map
+        .get(Value::from("start"))
+        .ok_or_else(|| missing("start"))?;
     let start = start_value
         .as_str()
         .filter(|s| !s.is_empty())
@@ -760,7 +748,9 @@ fn parse_scope(
         }
     };
     if rules.is_empty() {
-        return Err(at_scope("scope has no `rules` — a scope without rules does nothing"));
+        return Err(at_scope(
+            "scope has no `rules` — a scope without rules does nothing",
+        ));
     }
 
     Ok(Scope {
@@ -799,8 +789,7 @@ fn parse_rule(
         if let Some(key) = key.as_str() {
             if !matches!(
                 key,
-                "id" | "pattern" | "message" | "severity" | "callback" | "parser"
-                    | "fix" | "tests"
+                "id" | "pattern" | "message" | "severity" | "callback" | "parser" | "fix" | "tests"
             ) {
                 return Err(at_rule(format!(
                     "unknown key `{key}` (expected one of `id`, `pattern`, `parser`, \
@@ -1026,10 +1015,7 @@ fn parse_tests(
 /// under `key` — the rule/scope entry lines. Flow-style sequences
 /// (`rules: [...]`) yield nothing, and errors then simply carry no line.
 fn sequence_item_lines(yaml: &str, key: &str) -> Vec<usize> {
-    block_seq_item_lines(
-        yaml.lines().enumerate().map(|(i, l)| (i + 1, l)),
-        key,
-    )
+    block_seq_item_lines(yaml.lines().enumerate().map(|(i, l)| (i + 1, l)), key)
 }
 
 /// Like [`sequence_item_lines`], but scanning only after `from_line`
@@ -1038,10 +1024,7 @@ fn sequence_item_lines(yaml: &str, key: &str) -> Vec<usize> {
 fn nested_sequence_item_lines(yaml: &str, from_line: Option<usize>, key: &str) -> Vec<usize> {
     let skip = from_line.unwrap_or(usize::MAX);
     block_seq_item_lines(
-        yaml.lines()
-            .enumerate()
-            .skip(skip)
-            .map(|(i, l)| (i + 1, l)),
+        yaml.lines().enumerate().skip(skip).map(|(i, l)| (i + 1, l)),
         key,
     )
 }
@@ -1121,7 +1104,10 @@ scopes:
 ";
         // The scope's `- ` entry is on line 3; its nested rule items are
         // lines 6 and 8.
-        assert_eq!(nested_sequence_item_lines(yaml, Some(3), "rules"), vec![6, 8]);
+        assert_eq!(
+            nested_sequence_item_lines(yaml, Some(3), "rules"),
+            vec![6, 8]
+        );
     }
 
     #[test]

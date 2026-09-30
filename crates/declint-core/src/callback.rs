@@ -233,9 +233,13 @@ impl CallbackRef {
     /// Classifies a `callback:` string.
     pub fn parse(s: &str) -> Self {
         if s.ends_with(".lua") {
-            Self::File { path: s.to_string() }
+            Self::File {
+                path: s.to_string(),
+            }
         } else if s.chars().any(char::is_whitespace) {
-            Self::Inline { source: s.to_string() }
+            Self::Inline {
+                source: s.to_string(),
+            }
         } else {
             Self::Name(s.to_string())
         }

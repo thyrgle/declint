@@ -59,7 +59,10 @@ fn check_discovers_config_and_infers_language() {
     let (stdout, _stderr, code) = run_check(&dir, &["notes.md", "script.sh"]);
     assert_eq!(code, Some(1), "stdout: {stdout}");
     assert!(stdout.contains("notes.md:1:5: error[no-sudo]"), "{stdout}");
-    assert!(!stdout.contains("script.sh"), "sh is filtered out: {stdout}");
+    assert!(
+        !stdout.contains("script.sh"),
+        "sh is filtered out: {stdout}"
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -85,15 +88,10 @@ fn explicit_config_directory_and_clean_exit() {
     // Move the hidden file into a .declint/ directory config.
     let declint_dir = dir.join(".declint");
     std::fs::create_dir_all(&declint_dir).unwrap();
-    std::fs::rename(
-        dir.join(".declint.yaml"),
-        declint_dir.join("docs.yaml"),
-    )
-    .unwrap();
+    std::fs::rename(dir.join(".declint.yaml"), declint_dir.join("docs.yaml")).unwrap();
 
     // Explicit --config pointing at the directory.
-    let (stdout, _stderr, code) =
-        run_check(&dir, &["--config", ".declint", "notes.md"]);
+    let (stdout, _stderr, code) = run_check(&dir, &["--config", ".declint", "notes.md"]);
     assert_eq!(code, Some(1), "stdout: {stdout}");
     assert!(stdout.contains("notes.md:1:5: error[no-sudo]"), "{stdout}");
 
@@ -102,7 +100,10 @@ fn explicit_config_directory_and_clean_exit() {
     let (stdout, stderr, code) = run_check(&dir, &["--config", ".declint", "clean.md"]);
     assert_eq!(code, Some(0));
     assert!(stdout.is_empty(), "{stdout}");
-    assert!(stderr.contains("0 violation") || stderr.is_empty(), "{stderr}");
+    assert!(
+        stderr.contains("0 violation") || stderr.is_empty(),
+        "{stderr}"
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -171,7 +172,9 @@ fn github_format_emits_workflow_commands() {
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(stdout.lines().count(), 1, "{stdout}");
     assert!(
-        stdout.starts_with("::error file=a.ini,line=1,col=5,endLine=1::[declint/no-sudo] no sudo: 100%25 bad"),
+        stdout.starts_with(
+            "::error file=a.ini,line=1,col=5,endLine=1::[declint/no-sudo] no sudo: 100%25 bad"
+        ),
         "{stdout}"
     );
 
@@ -342,7 +345,10 @@ fn lua_print_goes_to_stderr_not_the_output_stream() {
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(!stdout.contains("DEBUG"), "stdout: {stdout}");
     assert!(stderr.contains("DEBUG from lua callback"), "{stderr}");
-    assert!(stdout.is_empty(), "the callback allows everything: {stdout}");
+    assert!(
+        stdout.is_empty(),
+        "the callback allows everything: {stdout}"
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -387,7 +393,10 @@ fn fail_on_threshold_controls_the_exit_code_but_not_the_output() {
     let (code, stdout, stderr) = run(&["--fail-on", "error", "g.ini"]);
     assert_eq!(code, Some(0), "{stderr}");
     assert!(stdout.contains("hint-rule"), "{stdout}");
-    assert!(stderr.contains("all below the --fail-on threshold"), "{stderr}");
+    assert!(
+        stderr.contains("all below the --fail-on threshold"),
+        "{stderr}"
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -435,7 +444,10 @@ fn test_command_runs_embedded_fixtures() {
     assert!(stdout.contains("] clean passes"), "{stdout}");
     assert!(stdout.contains("FAIL probe ["), "{stdout}");
     assert!(stdout.contains("] wrong count fails"), "{stdout}");
-    assert!(stdout.contains("expected 5 violation(s), got 2"), "{stdout}");
+    assert!(
+        stdout.contains("expected 5 violation(s), got 2"),
+        "{stdout}"
+    );
     assert!(stderr.contains("2 test(s) passed, 1 failed"), "{stderr}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -458,7 +470,10 @@ fn explain_reports_configs_rules_and_counts() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     assert_eq!(output.status.code(), Some(0));
-    assert!(stdout.contains("file: app.py (language: python)"), "{stdout}");
+    assert!(
+        stdout.contains("file: app.py (language: python)"),
+        "{stdout}"
+    );
     assert!(stdout.contains("— applied"), "{stdout}");
     assert!(stdout.contains("probe: warning [regex]"), "{stdout}");
     assert!(stdout.contains("violations in this file: 1"), "{stdout}");
@@ -539,11 +554,18 @@ fn fix_flag_applies_fixes_in_place() {
 fn install_list_and_remove() {
     let dir = std::env::temp_dir().join(format!("ezlint-ilst-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    write(&dir.join(".declint.yaml"), "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n");
+    write(
+        &dir.join(".declint.yaml"),
+        "version: 1\nrules:\n  - id: r\n    pattern: x\n    message: m\n",
+    );
     // Vendor a package by hand, as an install would.
     let vendored = dir.join(".declint/vendor/thyrgle/rules/HEAD");
     std::fs::create_dir_all(&vendored).unwrap();
-    std::fs::write(vendored.join("declint.yaml"), "version: 1\nrules:\n  - id: v\n    pattern: y\n    message: m\n").unwrap();
+    std::fs::write(
+        vendored.join("declint.yaml"),
+        "version: 1\nrules:\n  - id: v\n    pattern: y\n    message: m\n",
+    )
+    .unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_declint"))
         .args(["install", "--list"])

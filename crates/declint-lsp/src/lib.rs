@@ -39,10 +39,13 @@ use declint_core::{
     segment_all, Callbacks, ConfigError, ConfigSet, DocInfo, Linter, Scope, Severity, Violation,
 };
 use increparse::{Engine, Outcome, Pass, Span};
-use increparse_lsp::{Document, SimpleLanguage};
 #[cfg(test)]
 use increparse_lsp::Language;
-use lsp_types::{CodeAction, CodeActionKind, Diagnostic, DiagnosticSeverity, NumberOrString, TextEdit, WorkspaceEdit};
+use increparse_lsp::{Document, SimpleLanguage};
+use lsp_types::{
+    CodeAction, CodeActionKind, Diagnostic, DiagnosticSeverity, NumberOrString, TextEdit,
+    WorkspaceEdit,
+};
 
 /// A parse-tree context: the whole file, or one scope's region.
 ///
@@ -166,10 +169,7 @@ fn tree_segments(doc: &Document<Ctx>) -> Vec<(usize, declint_core::Span)> {
 /// contribute diagnostics. Rules referencing callbacks that are not in
 /// `callbacks` make this fail — Lua callbacks come from
 /// `declint_lua::attach`.
-pub fn language(
-    set: ConfigSet,
-    callbacks: &Callbacks,
-) -> Result<SimpleLanguage<Ctx>, ConfigError> {
+pub fn language(set: ConfigSet, callbacks: &Callbacks) -> Result<SimpleLanguage<Ctx>, ConfigError> {
     let table = set.scope_table();
     // Global scope index -> (config index, local scope index).
     let owners: std::sync::Arc<Vec<(usize, usize)>> =
@@ -238,13 +238,13 @@ pub fn language(
                     if !overlaps {
                         continue;
                     }
-                    let span =
-                        increparse::Span::new(violation.span.start, violation.span.end, doc.revision());
+                    let span = increparse::Span::new(
+                        violation.span.start,
+                        violation.span.end,
+                        doc.revision(),
+                    );
                     actions.push(CodeAction {
-                        title: format!(
-                            "declint: apply fix for '{}'",
-                            violation.rule_id
-                        ),
+                        title: format!("declint: apply fix for '{}'", violation.rule_id),
                         kind: Some(CodeActionKind::QUICKFIX),
                         edit: Some(WorkspaceEdit {
                             changes: Some(
@@ -290,10 +290,7 @@ fn applies(languages: &[String], language_id: &str) -> bool {
 
 /// Runs an declint language server on stdio until the client sends
 /// `shutdown` + `exit`.
-pub fn serve(
-    set: ConfigSet,
-    callbacks: &Callbacks,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub fn serve(set: ConfigSet, callbacks: &Callbacks) -> Result<(), Box<dyn Error + Send + Sync>> {
     let language = language(set, callbacks)?;
     increparse_lsp::serve(language)
 }
@@ -360,13 +357,7 @@ scopes:
             Ctx::Root,
         );
         let lang = language_from(&[SH_YAML, ANY_YAML]);
-        doc.apply_changes(
-            lang.engine(),
-            0,
-            &[],
-            &SerialExecutor,
-            &CancelToken::new(),
-        );
+        doc.apply_changes(lang.engine(), 0, &[], &SerialExecutor, &CancelToken::new());
         doc
     }
 
@@ -419,17 +410,33 @@ scopes:
         // Replace the tab with a space (line 0, chars 6..7).
         let change = lsp_types::TextDocumentContentChangeEvent {
             range: Some(lsp_types::Range {
-                start: lsp_types::Position { line: 0, character: 6 },
-                end: lsp_types::Position { line: 0, character: 7 },
+                start: lsp_types::Position {
+                    line: 0,
+                    character: 6,
+                },
+                end: lsp_types::Position {
+                    line: 0,
+                    character: 7,
+                },
             }),
             range_length: None,
             text: " ".into(),
         };
-        doc.apply_changes(lang.engine(), 1, &[change], &SerialExecutor, &CancelToken::new());
+        doc.apply_changes(
+            lang.engine(),
+            1,
+            &[change],
+            &SerialExecutor,
+            &CancelToken::new(),
+        );
 
         assert_eq!(before, tree_segments(&doc), "the region kept its identity");
         let diags = Language::extra_diagnostics(&lang, &doc);
-        assert_eq!(codes(&diags), ["scoped-rule"], "the tab healed, fence remains");
+        assert_eq!(
+            codes(&diags),
+            ["scoped-rule"],
+            "the tab healed, fence remains"
+        );
     }
 
     #[test]
@@ -437,7 +444,10 @@ scopes:
         let config = Config::from_str(SH_YAML).unwrap();
         let lang = language(ConfigSet::single(config), &Callbacks::new()).unwrap();
         let doc = doc_with("sh", "sudo\n");
-        assert_eq!(codes(&Language::extra_diagnostics(&lang, &doc)), ["no-sudo"]);
+        assert_eq!(
+            codes(&Language::extra_diagnostics(&lang, &doc)),
+            ["no-sudo"]
+        );
     }
 
     #[test]
@@ -510,7 +520,14 @@ rules:
 
     fn doc_with(text: &str) -> Document<Ctx> {
         let uri: Uri = "file:///a.ini".parse().unwrap();
-        let mut doc = Document::open(uri, 0, "ini".into(), text.into(), PositionEncoding::Utf16, Ctx::Root);
+        let mut doc = Document::open(
+            uri,
+            0,
+            "ini".into(),
+            text.into(),
+            PositionEncoding::Utf16,
+            Ctx::Root,
+        );
         let lang = language(
             ConfigSet::single(Config::from_str(YAML).unwrap()),
             &Callbacks::new(),
@@ -529,8 +546,14 @@ rules:
         .unwrap();
         let doc = doc_with("x ==  1\n");
         let range = lsp_types::Range {
-            start: lsp_types::Position { line: 0, character: 0 },
-            end: lsp_types::Position { line: 0, character: 8 },
+            start: lsp_types::Position {
+                line: 0,
+                character: 0,
+            },
+            end: lsp_types::Position {
+                line: 0,
+                character: 8,
+            },
         };
         let actions = Language::code_action(&lang, &doc, range);
         assert_eq!(actions.len(), 1);
@@ -553,13 +576,28 @@ rules:
         .unwrap();
         let doc = doc_with("x ==  1\nsecond ==  2\n");
         let range = lsp_types::Range {
-            start: lsp_types::Position { line: 1, character: 0 },
-            end: lsp_types::Position { line: 1, character: 14 },
+            start: lsp_types::Position {
+                line: 1,
+                character: 0,
+            },
+            end: lsp_types::Position {
+                line: 1,
+                character: 14,
+            },
         };
         let actions = Language::code_action(&lang, &doc, range);
         assert_eq!(actions.len(), 1, "only the second line's fix");
         assert!(
-            actions[0].edit.as_ref().unwrap().changes.as_ref().unwrap().values().next().unwrap()[0]
+            actions[0]
+                .edit
+                .as_ref()
+                .unwrap()
+                .changes
+                .as_ref()
+                .unwrap()
+                .values()
+                .next()
+                .unwrap()[0]
                 .range
                 .start
                 .line

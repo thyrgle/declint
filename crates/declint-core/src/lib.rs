@@ -66,21 +66,23 @@ mod config;
 /// `declint install -g`, resolved by `import: global:<pkg>`.
 pub mod store;
 
-/// The embedded preset library: curated config fragments importable as
-/// `import: preset:<name>`.
-pub mod presets;
 mod config_set;
 mod lang;
 mod linter;
+/// The embedded preset library: curated config fragments importable as
+/// `import: preset:<name>`.
+pub mod presets;
 mod scopes;
 mod suppressions;
 mod template;
 
 pub use callback::{
-    Callbacks, CallbackRef, Decision, MatchCallback, MatchContext, MatchParser, RawMatch,
+    CallbackRef, Callbacks, Decision, MatchCallback, MatchContext, MatchParser, RawMatch,
 };
 pub use config::{Config, ConfigError, Rule, RuleTest, Scope, SUPPORTED_VERSION};
-pub use config_set::{ConfigSet, NamedConfig, ScopeEntry, CONFIG_DIR, CONFIG_FILE, LEGACY_CONFIG_FILE};
+pub use config_set::{
+    ConfigSet, NamedConfig, ScopeEntry, CONFIG_DIR, CONFIG_FILE, LEGACY_CONFIG_FILE,
+};
 pub use lang::{language_from_extension, language_from_path};
 pub use linter::{line_col, DocInfo, Linter, Span, Violation};
 pub use scopes::{segment, segment_all};

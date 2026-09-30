@@ -218,7 +218,11 @@ fn severity_paint(severity: declint_core::Severity) -> &'static str {
 fn apply_fixes(source: &str, violations: &[Violation]) -> (String, usize) {
     let mut fixes: Vec<(usize, usize, &str)> = violations
         .iter()
-        .filter_map(|v| v.fix.as_ref().map(|f| (v.span.start, v.span.end, f.as_str())))
+        .filter_map(|v| {
+            v.fix
+                .as_ref()
+                .map(|f| (v.span.start, v.span.end, f.as_str()))
+        })
         .collect();
     fixes.sort_by_key(|(start, end, _)| (*start, *end));
 
@@ -241,7 +245,9 @@ fn apply_fixes(source: &str, violations: &[Violation]) -> (String, usize) {
 fn load_set(config: Option<&PathBuf>) -> ConfigSet {
     let loaded = match config {
         Some(path) => ConfigSet::load(path),
-        None => ConfigSet::discover(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))),
+        None => {
+            ConfigSet::discover(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        }
     };
     match loaded {
         Ok(set) => set,
@@ -292,7 +298,11 @@ fn print_json(
 ) {
     for violation in violations {
         let (line, col) = declint_core::line_col(source, violation.span.start);
-        let last = violation.span.end.saturating_sub(1).max(violation.span.start);
+        let last = violation
+            .span
+            .end
+            .saturating_sub(1)
+            .max(violation.span.start);
         let (end_line, end_col) = declint_core::line_col(source, last);
         items.push(serde_json::json!({
             "file": path.display().to_string(),
@@ -407,7 +417,10 @@ fn check(
         return ExitCode::from(2);
     }
     if format == OutputFormat::Json {
-        println!("{}", serde_json::to_string_pretty(&json_items).unwrap_or_else(|_| "[]".into()));
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json_items).unwrap_or_else(|_| "[]".into())
+        );
     }
     if failing > 0 {
         if failing == total {
@@ -418,19 +431,12 @@ fn check(
         return ExitCode::from(1);
     }
     if total > 0 {
-        eprintln!(
-            "declint: {total} violation(s) — all below the --fail-on threshold"
-        );
+        eprintln!("declint: {total} violation(s) — all below the --fail-on threshold");
     }
     ExitCode::SUCCESS
 }
 
-fn print_text(
-    path: &std::path::Path,
-    source: &str,
-    violations: &[Violation],
-    colored: bool,
-) {
+fn print_text(path: &std::path::Path, source: &str, violations: &[Violation], colored: bool) {
     for violation in violations {
         let (line, col) = declint_core::line_col(source, violation.span.start);
         if colored {
@@ -468,7 +474,11 @@ fn print_github(path: &std::path::Path, source: &str, violations: &[Violation]) 
         let (line, col) = declint_core::line_col(source, violation.span.start);
         // The span's end is exclusive; annotate through the last
         // included character.
-        let last = violation.span.end.saturating_sub(1).max(violation.span.start);
+        let last = violation
+            .span
+            .end
+            .saturating_sub(1)
+            .max(violation.span.start);
         let (end_line, _) = declint_core::line_col(source, last);
         let command = match violation.severity {
             declint_core::Severity::Error => "error",
@@ -571,14 +581,13 @@ fn run_tests(config: Option<&PathBuf>, filters: &[String]) -> ExitCode {
             .configs()
             .iter()
             .flat_map(|named| {
-                named
-                    .config
-                    .rules
-                    .iter()
-                    .map(|r| r.id.clone())
-                    .chain(named.config.scopes.iter().flat_map(|s| {
-                        s.rules.iter().map(|r| r.id.clone())
-                    }))
+                named.config.rules.iter().map(|r| r.id.clone()).chain(
+                    named
+                        .config
+                        .scopes
+                        .iter()
+                        .flat_map(|s| s.rules.iter().map(|r| r.id.clone())),
+                )
             })
             .collect();
         if let Some(missing) = filters.iter().find(|f| !known.contains(*f)) {
@@ -606,11 +615,8 @@ fn run_tests(config: Option<&PathBuf>, filters: &[String]) -> ExitCode {
             any_tests = true;
             for test in &rule.tests {
                 let label = test.name.as_deref().unwrap_or("test");
-                let violations = linters[i].lint_rule(
-                    &rule.id,
-                    declint_core::DocInfo::none(),
-                    &test.text,
-                );
+                let violations =
+                    linters[i].lint_rule(&rule.id, declint_core::DocInfo::none(), &test.text);
                 let mut problems = Vec::new();
                 match violations {
                     Err(e) => problems.push(format!("callback/parser error: {e}")),
@@ -655,11 +661,7 @@ fn run_tests(config: Option<&PathBuf>, filters: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn explain(
-    config: Option<&PathBuf>,
-    language: Option<&String>,
-    file: &PathBuf,
-) -> ExitCode {
+fn explain(config: Option<&PathBuf>, language: Option<&String>, file: &PathBuf) -> ExitCode {
     let set = load_set(config);
     let callbacks = load_callbacks(&set);
 
@@ -701,7 +703,11 @@ fn explain(
         println!(
             "\nconfig {} [languages: {languages}] — {}",
             named.path.display(),
-            if applies { "applied" } else { "skipped (language)" }
+            if applies {
+                "applied"
+            } else {
+                "skipped (language)"
+            }
         );
         if !applies {
             continue;
@@ -728,17 +734,11 @@ fn explain(
             let extra = match (&rule.callback, &rule.parser) {
                 (Some(reference), _) => match callbacks.resolve(reference) {
                     Some(_) => format!(", callback: {}", reference.describe()),
-                    None => format!(
-                        ", callback: {} — NOT REGISTERED",
-                        reference.describe()
-                    ),
+                    None => format!(", callback: {} — NOT REGISTERED", reference.describe()),
                 },
                 (None, Some(reference)) => match callbacks.resolve_parser(reference) {
                     Some(_) => format!(", parser: {}", reference.describe()),
-                    None => format!(
-                        ", parser: {} — NOT REGISTERED",
-                        reference.describe()
-                    ),
+                    None => format!(", parser: {} — NOT REGISTERED", reference.describe()),
                 },
                 (None, None) => String::new(),
             };
@@ -749,9 +749,7 @@ fn explain(
             };
             println!(
                 "  {}{}: {} [{kind}{extra}{tests}]",
-                rule.id,
-                prefix,
-                rule.severity
+                rule.id, prefix, rule.severity
             );
         }
 
@@ -858,7 +856,11 @@ fn main() -> ExitCode {
             language,
             file,
         } => explain(config.as_ref(), language.as_ref(), &file),
-        Command::Install { global, list, source } => {
+        Command::Install {
+            global,
+            list,
+            source,
+        } => {
             if list {
                 return install_list(global);
             }
@@ -919,11 +921,7 @@ fn main() -> ExitCode {
                             println!("wired into {}", config_path.display());
                         }
                         None => {
-                            println!(
-                                "add to {}: import: [{}]",
-                                config_path.display(),
-                                relative
-                            );
+                            println!("add to {}: import: [{}]", config_path.display(), relative);
                         }
                     }
                 }
@@ -938,8 +936,7 @@ fn main() -> ExitCode {
         }
         Command::Remove { global, package } => {
             let target = if global {
-                declint_core::store::global_store_dir()
-                    .map(|store| store.join(&package))
+                declint_core::store::global_store_dir().map(|store| store.join(&package))
             } else {
                 std::env::current_dir()
                     .unwrap_or_else(|_| PathBuf::from("."))
@@ -952,7 +949,10 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             };
             if !target.exists() {
-                eprintln!("declint: `{package}` is not installed at {}", target.display());
+                eprintln!(
+                    "declint: `{package}` is not installed at {}",
+                    target.display()
+                );
                 return ExitCode::from(2);
             }
             match std::fs::remove_dir_all(&target) {
@@ -970,7 +970,12 @@ fn main() -> ExitCode {
             }
         }
         Command::Completions { shell } => {
-            clap_complete::generate(shell, &mut Cli::command(), "declint", &mut std::io::stdout());
+            clap_complete::generate(
+                shell,
+                &mut Cli::command(),
+                "declint",
+                &mut std::io::stdout(),
+            );
             ExitCode::SUCCESS
         }
     }

@@ -4,9 +4,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::callback::{
-    Callbacks, Decision, MatchCallback, MatchContext, MatchParser, RawMatch,
-};
+use crate::callback::{Callbacks, Decision, MatchCallback, MatchContext, MatchParser, RawMatch};
 use crate::config::{Config, ConfigError, Matcher, Rule, Scope};
 use crate::scopes;
 use crate::Severity;
@@ -468,7 +466,10 @@ fn collect_rule(
                         (severity.unwrap_or(rule.severity), message)
                     }
                     Ok(Decision::ViolateDefault) => match rule.message.as_ref() {
-                        Some(template) => (rule.severity, template.render_with(&ctx.match_text, &raw.captures)),
+                        Some(template) => (
+                            rule.severity,
+                            template.render_with(&ctx.match_text, &raw.captures),
+                        ),
                         None => (
                             Severity::Error,
                             format!(
@@ -480,13 +481,10 @@ fn collect_rule(
                 }
             }
         };
-        let fix = rule
-            .fix
-            .as_ref()
-            .map(|template| {
-                let match_text = source.get(start..finish).unwrap_or_default();
-                template.render_with(match_text, &raw.captures)
-            });
+        let fix = rule.fix.as_ref().map(|template| {
+            let match_text = source.get(start..finish).unwrap_or_default();
+            template.render_with(match_text, &raw.captures)
+        });
         out.push(Violation {
             rule_id: rule.id.clone(),
             severity,
@@ -567,7 +565,10 @@ rules:
 
     #[test]
     fn template_renders_named_group() {
-        let linter = linter(&basic_yaml("(?<word>\\w+) =", "var").replace("message: hit", "message: \"rename '{word}'\""));
+        let linter = linter(
+            &basic_yaml("(?<word>\\w+) =", "var")
+                .replace("message: hit", "message: \"rename '{word}'\""),
+        );
         let v = linter.lint("foo = 1");
         assert_eq!(v[0].message, "rename 'foo'");
     }
