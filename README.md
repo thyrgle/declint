@@ -476,7 +476,9 @@ $ declint check --format github .
 Directory arguments are walked recursively (`.gitignore` is respected,
 hidden paths and non-UTF-8 files skipped), so the whole incantation for
 a repository is `declint check .` with the config discovery you already
-use locally. Two knobs for CI:
+use locally. Using the `thyrgle/declint@v1` action? It caches the
+installed binary per version, so only the first run of a workflow pays
+the compile — after that it's restore-and-lint. Two knobs for CI:
 
 * `--fail-on error|warning|info|hint` — all violations are still
   reported (and annotated), but only those at or above the threshold
@@ -554,6 +556,9 @@ filter, style, and (later) suppress per rule.
 
 ## Roadmap
 
+- Prebuilt binaries in GitHub releases (linux, macOS) so `cargo install`
+  — in CI and elsewhere — becomes a fast download; no Rust toolchain
+  required at all.
 - v2: nested scopes (a scope inside a scope), callback `range` overrides,
   per-rule instruction budgets, `fix:` templates → LSP CodeActions,
   inline `# declint:disable=<id>` comments, per-rule file globs.

@@ -25,7 +25,14 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Restore cached declint
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/bin/declint
+        key: declint-bin-${{ runner.os }}-${{ inputs.declint-version }}
     - name: Install declint
+      if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       run: cargo install declint@${{ inputs.declint-version }} --locked
     - name: Check
